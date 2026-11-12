@@ -1,0 +1,9 @@
+# Overlay for running only PostgreSQL and Redis while Go/Vue run on the host.
+# Use the separate tvendo-dev project, so development volumes are isolated.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:15432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:16379:6379"

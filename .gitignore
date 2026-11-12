@@ -1,0 +1,10 @@
+.env
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+backend/server
+backend/tvendo
+*.log
+.DS_Store
+
+backend/bin/
