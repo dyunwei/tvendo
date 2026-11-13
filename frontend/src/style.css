@@ -11,6 +11,7 @@
   background: #fff;
   font-synthesis: none;
   font-weight: 400;
+  --brand-accent: #7973fa;
   --blue: #182be9;
   --muted: #898b86;
   --line: #e9eae6;
@@ -182,7 +183,7 @@ a svg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: #252722;
+  background: var(--brand-accent);
   color: white;
   width: 24px;
   height: 25px;
@@ -519,7 +520,7 @@ a svg {
     transform 0.2s;
 }
 .provider:hover {
-  border-color: #9da6e8;
+  border-color: #b5b0fc;
   transform: translateY(-2px);
 }
 .provider-logo {
@@ -622,7 +623,7 @@ a svg {
 }
 .steps code {
   font-size: 11px;
-  color: #5967c9;
+  color: var(--brand-accent);
   border: 1px solid var(--line);
   padding: 7px 11px;
   background: white;
@@ -634,7 +635,7 @@ a svg {
   margin-top: 20px;
 }
 .step-line {
-  background: linear-gradient(to right, #e1e4db, #1e2dd1);
+  background: linear-gradient(to right, #e1e4db, var(--brand-accent));
   height: 1px;
   width: 100px;
   margin-top: 25px;
@@ -756,7 +757,7 @@ a svg {
   overflow: hidden;
 }
 .blue-cta .eyebrow {
-  color: #a2afff;
+  color: #d2cffe;
 }
 .blue-cta h2 {
   font-size: 43px;
@@ -764,7 +765,7 @@ a svg {
   letter-spacing: -1.5px;
 }
 .blue-cta p {
-  color: #b6c0ff;
+  color: #e2dfff;
   margin-bottom: 30px;
 }
 .cta-asterisk {
@@ -3668,7 +3669,7 @@ td:last-child {
 :is(.console-shell, .modal-backdrop) .btn.primary {
   color: #ffffff;
 }
-.console-shell :is(.brand-mark, .environment i),
+.console-shell .environment i,
 :is(.console-shell, .modal-backdrop) .btn.dark {
   background: #242424;
 }
@@ -3736,4 +3737,210 @@ td:last-child {
 }
 :is(.console-shell, .modal-backdrop) :is(.btn.dark, .btn.primary) svg {
   color: #ffffff;
+}
+/* Provider catalogs can contain thousands of tools; keep editing bounded. */
+.modal select,
+.mcp-filters select {
+  margin-top: 9px;
+  padding: 10px 12px;
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  width: 100%;
+  font-size: 12px;
+}
+.mcp-sync-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 20px;
+}
+.mcp-sync-bar strong {
+  font-size: 13px;
+}
+.mcp-sync-bar small {
+  margin-top: 7px;
+}
+.mcp-hint {
+  font-size: 10px !important;
+  color: #777 !important;
+  margin: 15px 0 !important;
+}
+.mcp-filters {
+  display: grid;
+  grid-template-columns: 1fr 160px;
+  gap: 10px;
+  margin: 18px 0;
+}
+.mcp-filters select {
+  margin: 0;
+}
+.mcp-filters input {
+  border: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  padding: 8px 0 !important;
+}
+.mcp-bulk,
+.mcp-price-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  font-size: 10px;
+  color: #666;
+}
+.mcp-bulk .mcp-select {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  margin: 0 auto 0 0;
+}
+.mcp-bulk input,
+.mcp-table input {
+  accent-color: #7973fa;
+}
+.mcp-price-bar label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 10px;
+  margin: 0;
+}
+.mcp-price-bar input {
+  width: 100px !important;
+  padding: 7px !important;
+  margin: 0 !important;
+}
+.mcp-table th,
+.mcp-table td {
+  padding: 13px 10px;
+  vertical-align: top;
+}
+.mcp-table td:nth-child(2) {
+  min-width: 190px;
+  white-space: normal;
+  max-width: 320px;
+}
+.mcp-table td:last-child {
+  white-space: normal;
+  min-width: 125px;
+}
+.mcp-table td:last-child .btn {
+  margin: 0 4px 5px 0;
+}
+.mcp-name {
+  font-size: 11px;
+  text-align: left;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+  padding: 0;
+  color: #333;
+}
+.mcp-table .status {
+  margin: 8px 7px 0 0;
+}
+.mcp-description {
+  font-size: 10px !important;
+  margin: 12px 0 !important;
+}
+.mcp-schema {
+  background: #f7f7f7;
+  font: 9px/1.8 monospace;
+  padding: 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  color: #555;
+}
+.mcp-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 15px 0 5px;
+}
+.mcp-pagination > span {
+  margin-right: auto;
+  font-size: 10px;
+  color: #777;
+}
+@media (max-width: 540px) {
+  .mcp-filters {
+    grid-template-columns: 1fr;
+  }
+  .mcp-sync-bar {
+    align-items: flex-start;
+  }
+  .mcp-sync-bar .btn {
+    font-size: 10px;
+  }
+  .mcp-price-bar {
+    gap: 10px;
+  }
+  .mcp-pagination .btn {
+    font-size: 9px;
+  }
+}
+.modal .mcp-single-price {
+  width: 105px;
+  padding: 6px 8px;
+  font-size: 10px;
+  margin-top: 8px;
+}
+.mcp-input-reference {
+  margin: 16px 0;
+  font-size: 11px;
+  color: #666;
+}
+.mcp-input-reference summary {
+  cursor: pointer;
+}
+.modal-backdrop .status.success i {
+  background: var(--status-success);
+}
+.modal-backdrop .status.failed i {
+  background: var(--status-error);
+}
+.modal-backdrop .status.running i {
+  background: var(--icon-accent);
+}
+.mcp-table {
+  max-height: min(440px, 45vh);
+}
+.mcp-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #ffffff;
+}
+
+/* Homepage branding matches the violet used by workspace icons. */
+.landing,
+.public-header,
+.public-footer {
+  --blue: var(--brand-accent);
+}
+.console-shell .brand-mark {
+  background: var(--brand-accent);
+}
+.public-footer .asterisk,
+.footer-word span {
+  color: var(--brand-accent);
+}
+.landing :is(.blue-cta, .provider-cta) {
+  background: #6c63df;
+}
+.landing .blue-cta :is(.eyebrow, p) {
+  color: #ffffff;
+}
+.landing :is(.steps code, .blue-cta .btn.white) {
+  color: #6258d2;
 }

@@ -19,6 +19,7 @@ import {
 } from "lucide-vue-next";
 import { api, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
+import MCPTools from "./MCPTools.vue";
 const route = useRoute(),
   section = computed(() => String(route.params.section || "tools"));
 const tools = ref<Tool[]>([]),
@@ -37,7 +38,24 @@ const tools = ref<Tool[]>([]),
   editorTab = ref("general"),
   topupUser = ref<any>(null),
   amount = ref(10),
-  note = ref("");
+  note = ref(""),
+  defaultPrice = ref(0.001);
+const mcpEditing = computed(
+  () =>
+    editing.value?.upstream_type === "mcp" ||
+    editing.value?.upstream_type === "mcp_sse",
+);
+async function refreshCatalog() {
+  if (!editing.value) return;
+  const id = editing.value.id;
+  tools.value = await api("/api/admin/tools");
+  const saved = tools.value.find((t) => t.id === id);
+  if (saved && editing.value) {
+    editing.value.endpoints = saved.endpoints;
+    editing.value.revision = saved.revision;
+    editing.value.last_synced_at = saved.last_synced_at;
+  }
+}
 const shownUsers = computed(() =>
   users.value.filter((u) =>
     (u.email + " " + u.name).toLowerCase().includes(search.value.toLowerCase()),
@@ -78,6 +96,8 @@ function edit(t?: Tool) {
     ? JSON.parse(JSON.stringify(t))
     : {
         id: 0,
+        upstream_type: "mcp",
+        default_price_micros: 1000,
         slug: "",
         name: "",
         category: "搜索与 SEO",
@@ -92,6 +112,7 @@ function edit(t?: Tool) {
         endpoints: [],
         resources: [],
       };
+  defaultPrice.value = (editing.value?.default_price_micros ?? 1000) / 1e6;
   secret.value = "";
   replaceSecret.value = false;
   endpointText.value = JSON.stringify(editing.value!.endpoints, null, 2);
@@ -124,16 +145,24 @@ async function save() {
   try {
     const t = {
       ...editing.value,
-      endpoints: JSON.parse(endpointText.value),
+      endpoints: mcpEditing.value ? [] : JSON.parse(endpointText.value),
+      default_price_micros: Math.round(defaultPrice.value * 1e6),
       resources: JSON.parse(resourceText.value),
     };
     if (!Array.isArray(t.endpoints) || !Array.isArray(t.resources))
       throw new Error("接口和资源必须是 JSON 数组");
     if (replaceSecret.value || secret.value) t.secret = secret.value;
-    await api("/api/admin/tools", { method: "POST", body: JSON.stringify(t) });
-    editing.value = null;
+    const saved = await api("/api/admin/tools", {
+      method: "POST",
+      body: JSON.stringify(t),
+    });
+    const mcp = mcpEditing.value;
     notice.value = "工具配置已保存";
     await load();
+    if (mcp) {
+      edit(tools.value.find((t) => t.id === saved.id));
+      editorTab.value = "endpoints";
+    } else editing.value = null;
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -328,7 +357,11 @@ function downloadExample() {
                     ? "保存工具配置"
                     : row.action === "topup"
                       ? "充值入账"
-                      : row.action
+                      : row.action === "sync_mcp"
+                        ? "同步 MCP 工具"
+                        : row.action === "bulk_mcp"
+                          ? "批量更新 MCP 工具"
+                          : row.action
                 }}
               </td>
               <td>{{ row.target_id }}</td>
@@ -458,7 +491,10 @@ function downloadExample() {
             <button
               v-for="t in [
                 { id: 'general', name: '基本信息与鉴权' },
-                { id: 'endpoints', name: '接口与定价' },
+                {
+                  id: 'endpoints',
+                  name: mcpEditing ? '工具与定价' : '接口与定价',
+                },
                 { id: 'resources', name: '资源说明' },
               ]"
               :key="t.id"
@@ -530,12 +566,38 @@ function downloadExample() {
               </div>
               <div class="form-divider">上游连接</div>
               <label
-                >上游 Base URL<input
-                  v-model="editing.base_url"
-                  placeholder="https://api.provider.com/v1"
+                >接入类型<select v-model="editing.upstream_type">
+                  <option value="mcp">MCP · Streamable HTTP</option>
+                  <option value="mcp_sse">MCP · 旧版 SSE</option>
+                  <option value="http">HTTP · 手动配置接口</option>
+                </select></label
+              >
+              <label v-if="mcpEditing"
+                >默认单次售价（USD）<input
+                  v-model.number="defaultPrice"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.000001"
                 /><small
-                  >与接口路径直接拼接；生产环境仅允许公网 HTTPS。</small
+                  >未设置单独售价的工具统一使用此价格。上游价格不会自动导入，0
+                  表示免费。</small
                 ></label
+              >
+              <label
+                >{{ mcpEditing ? "MCP 完整地址" : "上游 Base URL"
+                }}<input
+                  v-model="editing.base_url"
+                  :placeholder="
+                    mcpEditing
+                      ? 'https://provider.com/mcp'
+                      : 'https://api.provider.com/v1'
+                  "
+                /><small>{{
+                  mcpEditing
+                    ? "填写完整 MCP 端点，不拼接路径。保存后可一键同步工具。"
+                    : "与接口路径直接拼接；生产环境仅允许公网 HTTPS。"
+                }}</small></label
               >
               <div class="form-grid">
                 <label
@@ -579,31 +641,43 @@ function downloadExample() {
               </div>
             </div>
             <div v-show="editorTab === 'endpoints'" class="editor-body">
-              <div class="alert">
-                售价使用整数微美元：<strong>1000 = $0.001</strong
-                >。每个接口单次计费，参数示例将显示给用户。
-              </div>
-              <div class="json-toolbar">
-                <span>接口配置（JSON 数组）</span
-                ><button
-                  type="button"
-                  class="btn outline small"
-                  @click="addEndpoint"
-                >
-                  <Plus :size="14" />添加接口模板
-                </button>
-              </div>
-              <textarea
-                v-model="endpointText"
-                class="json-editor mono"
-                rows="20"
-                spellcheck="false"
-                aria-label="接口 JSON 配置"
-              /><small
-                >字段：id（唯一标识）、name、path、method、description、price_micros、parameters（参数示例）。支持
-                GET / POST / PUT / PATCH /
-                DELETE。此版本不支持参数映射、动态路径或流式返回。</small
+              <template v-if="mcpEditing"
+                ><MCPTools
+                  v-if="editing.id"
+                  :provider="editing"
+                  :refresh="refreshCatalog"
+                />
+                <div v-else class="alert">
+                  先保存连接信息，再同步上游工具。
+                </div></template
               >
+              <template v-else>
+                <div class="alert">
+                  售价使用整数微美元：<strong>1000 = $0.001</strong
+                  >。每个接口单次计费，参数示例将显示给用户。
+                </div>
+                <div class="json-toolbar">
+                  <span>接口配置（JSON 数组）</span
+                  ><button
+                    type="button"
+                    class="btn outline small"
+                    @click="addEndpoint"
+                  >
+                    <Plus :size="14" />添加接口模板
+                  </button>
+                </div>
+                <textarea
+                  v-model="endpointText"
+                  class="json-editor mono"
+                  rows="20"
+                  spellcheck="false"
+                  aria-label="接口 JSON 配置"
+                /><small
+                  >字段：id（唯一标识）、name、path、method、description、price_micros、parameters（参数示例）。支持
+                  GET / POST / PUT / PATCH /
+                  DELETE。此版本不支持参数映射、动态路径或流式返回。</small
+                >
+              </template>
             </div>
             <div v-show="editorTab === 'resources'" class="editor-body">
               <div class="alert">

@@ -1172,8 +1172,16 @@ const statusLabel = (s: string) =>
               type="password"
               required
               autocomplete="off"
-              placeholder="tv_live_…（仅在本次弹窗使用）" /></label
-          ><label
+              placeholder="tv_live_…（仅在本次弹窗使用）"
+          /></label>
+          <details v-if="invocation.input_schema" class="mcp-input-reference">
+            <summary>查看参数 Schema</summary>
+            <pre class="mcp-schema">{{
+              JSON.stringify(invocation.input_schema, null, 2)
+            }}</pre>
+            <small>下方为生成的参数示例，请按 Schema 填写实际值。</small>
+          </details>
+          <label
             >请求参数（JSON）<textarea
               v-model="params"
               class="mono"

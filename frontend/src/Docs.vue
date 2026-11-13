@@ -102,7 +102,8 @@ const items = [
           >查看 SKILL.md <ArrowUpRight :size="15"
         /></a>
         <div class="alert">
-          当前版本支持 Skill 说明和 REST API。MCP 服务和独立 CLI 暂未提供。
+          当前版本支持 Skill、REST API 及上游 MCP 工具。面向用户的 MCP
+          服务端和独立 CLI 暂未提供。
         </div></template
       >
       <template v-else-if="tab === 'api'"
@@ -163,7 +164,7 @@ const items = [
           </tbody>
         </table>
         <div class="alert">
-          第一版仅支持同步 HTTP / JSON 接口，超时 60 秒，最大响应 8
+          当前支持同步 HTTP / JSON 和远程 MCP 工具调用，超时 60 秒，最大响应 8
           MB。异步任务、流式响应、浏览器资源租赁暂未实现。
         </div></template
       >

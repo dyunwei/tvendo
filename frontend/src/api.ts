@@ -7,6 +7,12 @@ export interface User {
   balance: number;
 }
 export interface Endpoint {
+  mcp_name?: string;
+  input_schema?: unknown;
+  disabled?: boolean;
+  missing?: boolean;
+  schema_changed?: boolean;
+  price_override?: boolean;
   id: string;
   name: string;
   path: string;
@@ -16,6 +22,10 @@ export interface Endpoint {
   parameters: unknown;
 }
 export interface Tool {
+  upstream_type?: "http" | "mcp" | "mcp_sse";
+  default_price_micros?: number;
+  revision?: number;
+  last_synced_at?: string | null;
   id: number;
   slug: string;
   name: string;

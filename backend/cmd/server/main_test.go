@@ -6,7 +6,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/json"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/redis/go-redis/v9"
 	"net/http"
 	"net/http/httptest"
@@ -240,4 +242,118 @@ func TestIntegrationBilling(t *testing.T) {
 	}
 	code, out, _ = request("POST", "/api/auth/login", map[string]string{"email": "admin@test.local", "password": "test-admin-password-1234"}, nil, "", "")
 	require(code, 200, out)
+
+	// MCP catalog synchronization, bulk operations and real tool billing.
+	remote := mcp.NewServer(&mcp.Implementation{Name: "integration", Version: "1"}, &mcp.ServerOptions{PageSize: 1})
+	addRemote := func(name string, schema string) {
+		remote.AddTool(&mcp.Tool{Name: name, InputSchema: json.RawMessage(schema)}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{IsError: req.Params.Name == "fail", Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+		})
+	}
+	for _, name := range []string{"one", "two", "fail"} {
+		addRemote(name, `{"type":"object"}`)
+	}
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return remote }, &mcp.StreamableHTTPOptions{JSONResponse: true})
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "upstream-secret" {
+			http.Error(w, "bad key", 401)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	defer mcpServer.Close()
+	provider := Tool{UpstreamType: "mcp", Slug: "remote", Name: "Remote", Category: "MCP", BaseURL: mcpServer.URL, AuthHeader: "X-API-Key", Secret: &secret, DefaultPrice: 50000, Enabled: true}
+	code, out, _ = request("POST", "/api/admin/tools", provider, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	providerID := fmt.Sprint(int64(out["id"].(float64)))
+	syncPath := "/api/admin/tools/" + providerID + "/sync"
+	bulkPath := "/api/admin/tools/" + providerID + "/bulk"
+	code, out, _ = request("POST", syncPath, nil, userCookie, userCSRF, "")
+	require(code, 403, out)
+	code, out, _ = request("POST", syncPath, nil, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	if out["added"].(float64) != 3 {
+		t.Fatal("did not sync all remote pages")
+	}
+	provider, e = a.provider(ctx, providerID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ids := []string{}
+	byName := map[string]string{}
+	for _, ep := range provider.Endpoints {
+		if !ep.Disabled {
+			t.Fatal("new tool automatically enabled")
+		}
+		ids = append(ids, ep.ID)
+		byName[ep.MCPName] = ep.ID
+	}
+	code, out, _ = request("POST", "/api/keys", map[string]string{"label": "MCP agent"}, userCookie, userCSRF, "")
+	require(code, 201, out)
+	mcpKey := out["key"].(string)
+	remoteRun := func(name string) map[string]any {
+		return map[string]any{"tool": "remote", "endpoint": byName[name], "parameters": map[string]any{}}
+	}
+	code, out, _ = request("POST", "/v1/run", remoteRun("one"), nil, "", mcpKey)
+	require(code, 404, out)
+	yes := true
+	code, out, _ = request("POST", bulkPath, BulkMCPRequest{Revision: provider.Revision, IDs: ids, Enabled: &yes}, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	code, out, _ = request("POST", bulkPath, BulkMCPRequest{Revision: provider.Revision, IDs: ids, Enabled: &yes}, adminCookie, adminCSRF, "")
+	require(code, 409, out)
+	code, out, _ = request("POST", "/v1/run", remoteRun("one"), nil, "", mcpKey)
+	require(code, 200, out)
+	if out["cost_micros"].(float64) != 50000 {
+		t.Fatal("default MCP price not charged")
+	}
+	before, _ := a.user(ctx, userID)
+	code, out, _ = request("POST", "/v1/run", remoteRun("fail"), nil, "", mcpKey)
+	require(code, 502, out)
+	after, _ := a.user(ctx, userID)
+	if after.Balance != before.Balance {
+		t.Fatal("MCP isError did not refund")
+	}
+	provider, _ = a.provider(ctx, providerID)
+	override := int64(20000)
+	code, out, _ = request("POST", bulkPath, BulkMCPRequest{Revision: provider.Revision, IDs: []string{byName["one"]}, Price: &override}, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	remote.RemoveTools("two")
+	addRemote("four", `{"type":"object"}`)
+	addRemote("one", `{"type":"object","properties":{"q":{"type":"string"}}}`)
+	code, out, _ = request("POST", syncPath, nil, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	provider, _ = a.provider(ctx, providerID)
+	for _, ep := range provider.Endpoints {
+		switch ep.MCPName {
+		case "one":
+			if ep.Disabled || !ep.PriceOverride || ep.Price != 20000 || !ep.SchemaChanged {
+				t.Fatal("resync overwrote price, enabled state or change indicator")
+			}
+		case "two":
+			if !ep.Disabled || !ep.Missing {
+				t.Fatal("removed tool not disabled")
+			}
+		case "four":
+			if !ep.Disabled {
+				t.Fatal("newly added tool auto-enabled")
+			}
+		}
+	}
+	code, out, _ = request("POST", "/v1/run", remoteRun("one"), nil, "", mcpKey)
+	require(code, 200, out)
+	if out["cost_micros"].(float64) != 20000 {
+		t.Fatal("MCP override not charged")
+	}
+	// A failed connection leaves the complete catalog unchanged.
+	originalRevision := provider.Revision
+	_, e = db.Exec(ctx, `UPDATE tools SET secret=$2 WHERE id=$1`, provider.ID, a.encrypt("wrong-key"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	code, out, _ = request("POST", syncPath, nil, adminCookie, adminCSRF, "")
+	require(code, 502, out)
+	provider, _ = a.provider(ctx, providerID)
+	if provider.Revision != originalRevision || len(provider.Endpoints) != 4 {
+		t.Fatal("failed sync modified catalog")
+	}
 }

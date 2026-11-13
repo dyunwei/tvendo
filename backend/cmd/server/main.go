@@ -55,19 +55,19 @@ type Session struct {
 	CSRF   string `json:"csrf"`
 }
 type Endpoint struct {
-	MCPName string `json:"mcp_name,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-	Disabled bool `json:"disabled,omitempty"`
-	Missing bool `json:"missing,omitempty"`
-	SchemaChanged bool `json:"schema_changed,omitempty"`
-	PriceOverride bool `json:"price_override,omitempty"`
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Path        string          `json:"path"`
-	Method      string          `json:"method"`
-	Description string          `json:"description"`
-	Price       int64           `json:"price_micros"`
-	Parameters  json.RawMessage `json:"parameters"`
+	MCPName       string          `json:"mcp_name,omitempty"`
+	InputSchema   json.RawMessage `json:"input_schema,omitempty"`
+	Disabled      bool            `json:"disabled,omitempty"`
+	Missing       bool            `json:"missing,omitempty"`
+	SchemaChanged bool            `json:"schema_changed,omitempty"`
+	PriceOverride bool            `json:"price_override,omitempty"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Path          string          `json:"path"`
+	Method        string          `json:"method"`
+	Description   string          `json:"description"`
+	Price         int64           `json:"price_micros"`
+	Parameters    json.RawMessage `json:"parameters"`
 }
 type Resource struct {
 	Name        string `json:"name"`
@@ -75,26 +75,26 @@ type Resource struct {
 	Price       string `json:"price"`
 }
 type Tool struct {
-	UpstreamType string `json:"upstream_type"`
-	DefaultPrice int64 `json:"default_price_micros"`
-	Revision int64 `json:"revision"`
+	UpstreamType string     `json:"upstream_type"`
+	DefaultPrice int64      `json:"default_price_micros"`
+	Revision     int64      `json:"revision"`
 	LastSyncedAt *time.Time `json:"last_synced_at"`
-	ID          int64      `json:"id"`
-	Slug        string     `json:"slug"`
-	Name        string     `json:"name"`
-	Category    string     `json:"category"`
-	Description string     `json:"description"`
-	Website     string     `json:"website"`
-	Docs        string     `json:"docs"`
-	Icon        string     `json:"icon"`
-	BaseURL     string     `json:"base_url,omitempty"`
-	AuthHeader  string     `json:"auth_header,omitempty"`
-	AuthPrefix  string     `json:"auth_prefix,omitempty"`
-	Secret      *string    `json:"secret,omitempty"`
-	HasSecret   bool       `json:"has_secret,omitempty"`
-	Enabled     bool       `json:"enabled"`
-	Endpoints   []Endpoint `json:"endpoints"`
-	Resources   []Resource `json:"resources"`
+	ID           int64      `json:"id"`
+	Slug         string     `json:"slug"`
+	Name         string     `json:"name"`
+	Category     string     `json:"category"`
+	Description  string     `json:"description"`
+	Website      string     `json:"website"`
+	Docs         string     `json:"docs"`
+	Icon         string     `json:"icon"`
+	BaseURL      string     `json:"base_url,omitempty"`
+	AuthHeader   string     `json:"auth_header,omitempty"`
+	AuthPrefix   string     `json:"auth_prefix,omitempty"`
+	Secret       *string    `json:"secret,omitempty"`
+	HasSecret    bool       `json:"has_secret,omitempty"`
+	Enabled      bool       `json:"enabled"`
+	Endpoints    []Endpoint `json:"endpoints"`
+	Resources    []Resource `json:"resources"`
 }
 
 func env(k, fallback string) string {
@@ -290,22 +290,48 @@ func (a *App) rows(w http.ResponseWriter, r *http.Request, q string, args ...any
 	writeJSON(w, 200, out)
 }
 func (a *App) listTools(w http.ResponseWriter, r *http.Request, admin bool) {
- q := `SELECT to_jsonb(t) FROM tools t`
- if !admin { q += ` WHERE enabled=true` }; q += ` ORDER BY id`
- rows, err := a.db.Query(r.Context(), q); if err != nil { fail(w,500,"无法加载工具"); return }; defer rows.Close()
- out := []Tool{}
- for rows.Next() {
-  var data []byte; var t Tool
-  if rows.Scan(&data)!=nil || json.Unmarshal(data,&t)!=nil { fail(w,500,"工具配置格式错误"); return }
-  t.HasSecret=t.Secret!=nil && *t.Secret!=""; t.Secret=nil
-  if !admin {
-   visible:=[]Endpoint{}
-   for _,ep:=range t.Endpoints { if !ep.Disabled && !ep.Missing { ep.Price=effectivePrice(t,ep); visible=append(visible,ep) } }
-   t.Endpoints=visible; t.BaseURL=""; t.AuthHeader=""; t.AuthPrefix=""; t.HasSecret=false
-  }
-  out=append(out,t)
- }
- if rows.Err()!=nil { fail(w,500,"无法加载工具"); return }; writeJSON(w,200,out)
+	q := `SELECT to_jsonb(t) FROM tools t`
+	if !admin {
+		q += ` WHERE enabled=true`
+	}
+	q += ` ORDER BY id`
+	rows, err := a.db.Query(r.Context(), q)
+	if err != nil {
+		fail(w, 500, "无法加载工具")
+		return
+	}
+	defer rows.Close()
+	out := []Tool{}
+	for rows.Next() {
+		var data []byte
+		var t Tool
+		if rows.Scan(&data) != nil || json.Unmarshal(data, &t) != nil {
+			fail(w, 500, "工具配置格式错误")
+			return
+		}
+		t.HasSecret = t.Secret != nil && *t.Secret != ""
+		t.Secret = nil
+		if !admin {
+			visible := []Endpoint{}
+			for _, ep := range t.Endpoints {
+				if !ep.Disabled && !ep.Missing {
+					ep.Price = effectivePrice(t, ep)
+					visible = append(visible, ep)
+				}
+			}
+			t.Endpoints = visible
+			t.BaseURL = ""
+			t.AuthHeader = ""
+			t.AuthPrefix = ""
+			t.HasSecret = false
+		}
+		out = append(out, t)
+	}
+	if rows.Err() != nil {
+		fail(w, 500, "无法加载工具")
+		return
+	}
+	writeJSON(w, 200, out)
 }
 func validSlug(s string) bool {
 	if len(s) < 1 || len(s) > 80 {
@@ -319,8 +345,12 @@ func validSlug(s string) bool {
 	return true
 }
 func validateTool(t Tool) error {
-	if t.UpstreamType!="" && t.UpstreamType!="http" && t.UpstreamType!="mcp" && t.UpstreamType!="mcp_sse" { return errors.New("不支持的上游类型") }
-	if t.DefaultPrice<0 || t.DefaultPrice>1000000000 { return errors.New("默认售价需在 0–1000 美元内") }
+	if t.UpstreamType != "" && t.UpstreamType != "http" && t.UpstreamType != "mcp" && t.UpstreamType != "mcp_sse" {
+		return errors.New("不支持的上游类型")
+	}
+	if t.DefaultPrice < 0 || t.DefaultPrice > 1000000000 {
+		return errors.New("默认售价需在 0–1000 美元内")
+	}
 	if !validSlug(t.Slug) || strings.TrimSpace(t.Name) == "" || len(t.Name) > 100 || t.Category == "" {
 		return errors.New("请填写工具名称、分类及有效标识（小写字母、数字、-、_）")
 	}
@@ -340,6 +370,9 @@ func validateTool(t Tool) error {
 			}
 		}
 	}
+	if t.Secret != nil && *t.Secret != "" && t.AuthHeader == "" {
+		return errors.New("配置密钥时请填写鉴权 Header")
+	}
 	if strings.ContainsAny(t.AuthHeader+t.AuthPrefix, "\r\n") || strings.ContainsAny(t.AuthHeader, " :\t") || strings.EqualFold(t.AuthHeader, "Host") || strings.EqualFold(t.AuthHeader, "Content-Length") {
 		return errors.New("鉴权 Header 配置无效")
 	}
@@ -349,7 +382,9 @@ func validateTool(t Tool) error {
 			return errors.New("接口标识需唯一且有效，名称必填，售价需在 0–1000 美元内")
 		}
 		ids[ep.ID] = true
-		if isMCP(t) { continue }
+		if isMCP(t) {
+			continue
+		}
 		switch ep.Method {
 		case "GET", "POST", "PUT", "PATCH", "DELETE":
 		default:
@@ -366,30 +401,80 @@ func validateTool(t Tool) error {
 	return nil
 }
 func (a *App) saveTool(w http.ResponseWriter, r *http.Request, u User) {
- var t Tool; if !decode(w,r,&t) { return }; if t.UpstreamType=="" { t.UpstreamType="http" }
- tx,err:=a.db.Begin(r.Context()); if err!=nil {fail(w,500,"保存失败");return};defer tx.Rollback(r.Context())
- if t.ID!=0 {
-  var raw []byte;var old Tool
-  if tx.QueryRow(r.Context(),`SELECT to_jsonb(t) FROM tools t WHERE id=$1 FOR UPDATE`,t.ID).Scan(&raw)!=nil || json.Unmarshal(raw,&old)!=nil {fail(w,404,"工具不存在");return}
-  if old.Revision!=t.Revision {fail(w,409,"配置已被更新，请重新打开后操作");return}
-  // Remote metadata is authoritative. MCP catalog changes use sync/bulk endpoints.
-  if isMCP(t) { if old.UpstreamType==t.UpstreamType && old.BaseURL==t.BaseURL { t.Endpoints=old.Endpoints } else {t.Endpoints=[]Endpoint{}} }
- } else if isMCP(t) { t.Endpoints=[]Endpoint{} }
- if err=validateTool(t);err!=nil {fail(w,400,err.Error());return}
- if t.Endpoints==nil {t.Endpoints=[]Endpoint{}};if t.Resources==nil {t.Resources=[]Resource{}}
- eps,_:=json.Marshal(t.Endpoints);res,_:=json.Marshal(t.Resources)
- var secret *string
- if t.Secret!=nil {v:="";if *t.Secret!=""{v=a.encrypt(*t.Secret)};secret=&v}
- var id int64
- if t.ID==0 {
-  v:="";if secret!=nil{v=*secret}
-  err=tx.QueryRow(r.Context(),`INSERT INTO tools(slug,name,category,description,website,docs,icon,base_url,auth_header,auth_prefix,secret,enabled,endpoints,resources,upstream_type,default_price_micros) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,t.Slug,t.Name,t.Category,t.Description,t.Website,t.Docs,t.Icon,t.BaseURL,t.AuthHeader,t.AuthPrefix,v,t.Enabled,eps,res,t.UpstreamType,t.DefaultPrice).Scan(&id)
- } else {
-  err=tx.QueryRow(r.Context(),`UPDATE tools SET slug=$2,name=$3,category=$4,description=$5,website=$6,docs=$7,icon=$8,base_url=$9,auth_header=$10,auth_prefix=$11,secret=COALESCE($12,secret),enabled=$13,endpoints=$14,resources=$15,upstream_type=$16,default_price_micros=$17,revision=revision+1,last_synced_at=CASE WHEN upstream_type=$16 AND base_url=$9 THEN last_synced_at ELSE NULL END WHERE id=$1 RETURNING id`,t.ID,t.Slug,t.Name,t.Category,t.Description,t.Website,t.Docs,t.Icon,t.BaseURL,t.AuthHeader,t.AuthPrefix,secret,t.Enabled,eps,res,t.UpstreamType,t.DefaultPrice).Scan(&id)
- }
- if err!=nil {fail(w,400,"保存失败：标识可能已存在");return}
- if _,err=tx.Exec(r.Context(),`INSERT INTO audit_log(actor_id,action,target_id) VALUES($1,'save_tool',$2)`,u.ID,id);err!=nil||tx.Commit(r.Context())!=nil{fail(w,500,"保存失败");return}
- writeJSON(w,200,map[string]any{"id":id})
+	var t Tool
+	if !decode(w, r, &t) {
+		return
+	}
+	if t.UpstreamType == "" {
+		t.UpstreamType = "http"
+	}
+	tx, err := a.db.Begin(r.Context())
+	if err != nil {
+		fail(w, 500, "保存失败")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if t.ID != 0 {
+		var raw []byte
+		var old Tool
+		if tx.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE id=$1 FOR UPDATE`, t.ID).Scan(&raw) != nil || json.Unmarshal(raw, &old) != nil {
+			fail(w, 404, "工具不存在")
+			return
+		}
+		if old.Revision != t.Revision {
+			fail(w, 409, "配置已被更新，请重新打开后操作")
+			return
+		}
+		// Remote metadata is authoritative. MCP catalog changes use sync/bulk endpoints.
+		if isMCP(t) {
+			if isMCP(old) && old.BaseURL == t.BaseURL {
+				t.Endpoints = old.Endpoints
+			} else {
+				t.Endpoints = []Endpoint{}
+			}
+		}
+	} else if isMCP(t) {
+		t.Endpoints = []Endpoint{}
+	}
+	if err = validateTool(t); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if t.Endpoints == nil {
+		t.Endpoints = []Endpoint{}
+	}
+	if t.Resources == nil {
+		t.Resources = []Resource{}
+	}
+	eps, _ := json.Marshal(t.Endpoints)
+	res, _ := json.Marshal(t.Resources)
+	var secret *string
+	if t.Secret != nil {
+		v := ""
+		if *t.Secret != "" {
+			v = a.encrypt(*t.Secret)
+		}
+		secret = &v
+	}
+	var id int64
+	if t.ID == 0 {
+		v := ""
+		if secret != nil {
+			v = *secret
+		}
+		err = tx.QueryRow(r.Context(), `INSERT INTO tools(slug,name,category,description,website,docs,icon,base_url,auth_header,auth_prefix,secret,enabled,endpoints,resources,upstream_type,default_price_micros) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, t.Slug, t.Name, t.Category, t.Description, t.Website, t.Docs, t.Icon, t.BaseURL, t.AuthHeader, t.AuthPrefix, v, t.Enabled, eps, res, t.UpstreamType, t.DefaultPrice).Scan(&id)
+	} else {
+		err = tx.QueryRow(r.Context(), `UPDATE tools SET slug=$2,name=$3,category=$4,description=$5,website=$6,docs=$7,icon=$8,base_url=$9,auth_header=$10,auth_prefix=$11,secret=COALESCE($12,secret),enabled=$13,endpoints=$14,resources=$15,upstream_type=$16,default_price_micros=$17,revision=revision+1,last_synced_at=CASE WHEN upstream_type=$16 AND base_url=$9 THEN last_synced_at ELSE NULL END WHERE id=$1 RETURNING id`, t.ID, t.Slug, t.Name, t.Category, t.Description, t.Website, t.Docs, t.Icon, t.BaseURL, t.AuthHeader, t.AuthPrefix, secret, t.Enabled, eps, res, t.UpstreamType, t.DefaultPrice).Scan(&id)
+	}
+	if err != nil {
+		fail(w, 400, "保存失败：标识可能已存在")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO audit_log(actor_id,action,target_id) VALUES($1,'save_tool',$2)`, u.ID, id); err != nil || tx.Commit(r.Context()) != nil {
+		fail(w, 500, "保存失败")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id})
 }
 func (a *App) keys(w http.ResponseWriter, r *http.Request, u User) {
 	switch r.Method {
@@ -554,12 +639,19 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
- var raw []byte; var provider Tool
- e:=a.db.QueryRow(r.Context(),`SELECT to_jsonb(t) FROM tools t WHERE slug=$1 AND enabled=true`,b.Tool).Scan(&raw)
- if e!=nil || json.Unmarshal(raw,&provider)!=nil {fail(w,404,"工具不存在或未启用");return}
- name,base,header,prefix:=provider.Name,provider.BaseURL,provider.AuthHeader,provider.AuthPrefix
- secret:="";if provider.Secret!=nil{secret=*provider.Secret}
- data,_:=json.Marshal(provider.Endpoints)
+	var raw []byte
+	var provider Tool
+	e := a.db.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE slug=$1 AND enabled=true`, b.Tool).Scan(&raw)
+	if e != nil || json.Unmarshal(raw, &provider) != nil {
+		fail(w, 404, "工具不存在或未启用")
+		return
+	}
+	name, base, header, prefix := provider.Name, provider.BaseURL, provider.AuthHeader, provider.AuthPrefix
+	secret := ""
+	if provider.Secret != nil {
+		secret = *provider.Secret
+	}
+	data, _ := json.Marshal(provider.Endpoints)
 	var eps []Endpoint
 	if json.Unmarshal(data, &eps) != nil {
 		fail(w, 500, "工具配置错误")
@@ -576,46 +668,46 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "接口不存在")
 		return
 	}
-	ep.Price=effectivePrice(provider,ep)
+	ep.Price = effectivePrice(provider, ep)
 	if b.Parameters == nil {
 		b.Parameters = map[string]any{}
 	}
- var req *http.Request
- if !isMCP(provider) {
-	payload, _ := json.Marshal(b.Parameters)
-	target := strings.TrimRight(base, "/") + ep.Path
-	if ep.Method == "GET" {
-		q := url.Values{}
-		for k, v := range b.Parameters {
-			switch x := v.(type) {
-			case string:
-				q.Set(k, x)
-			case float64, bool:
-				q.Set(k, fmt.Sprint(x))
-			default:
-				j, _ := json.Marshal(x)
-				q.Set(k, string(j))
+	var req *http.Request
+	if !isMCP(provider) {
+		payload, _ := json.Marshal(b.Parameters)
+		target := strings.TrimRight(base, "/") + ep.Path
+		if ep.Method == "GET" {
+			q := url.Values{}
+			for k, v := range b.Parameters {
+				switch x := v.(type) {
+				case string:
+					q.Set(k, x)
+				case float64, bool:
+					q.Set(k, fmt.Sprint(x))
+				default:
+					j, _ := json.Marshal(x)
+					q.Set(k, string(j))
+				}
 			}
+			target += "?" + q.Encode()
+			payload = nil
 		}
-		target += "?" + q.Encode()
-		payload = nil
-	}
-	req, e = http.NewRequestWithContext(r.Context(), ep.Method, target, strings.NewReader(string(payload)))
-	if e != nil {
-		fail(w, 400, "上游请求配置无效")
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	if secret != "" {
-		key, err := a.decrypt(secret)
-		if err != nil {
-			fail(w, 500, "无法读取上游密钥")
+		req, e = http.NewRequestWithContext(r.Context(), ep.Method, target, strings.NewReader(string(payload)))
+		if e != nil {
+			fail(w, 400, "上游请求配置无效")
 			return
 		}
-		req.Header.Set(header, prefix+key)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		if secret != "" {
+			key, err := a.decrypt(secret)
+			if err != nil {
+				fail(w, 500, "无法读取上游密钥")
+				return
+			}
+			req.Header.Set(header, prefix+key)
+		}
 	}
- }
 	tx, e := a.db.Begin(r.Context())
 	if e != nil {
 		fail(w, 500, "无法预留余额")
@@ -655,18 +747,31 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
- var body []byte
- status:=0; var callErr error
- if isMCP(provider) {
-  callCtx,cancel:=context.WithTimeout(r.Context(),60*time.Second)
-  body,callErr=a.callMCP(callCtx,provider,ep,b.Parameters);cancel()
-  if callErr==nil {status=200} else {status=502}
- } else {
-  var response *http.Response
-  response,callErr=a.client.Do(req)
-  if callErr==nil {status=response.StatusCode;body,callErr=io.ReadAll(io.LimitReader(response.Body,(8<<20)+1));response.Body.Close();if len(body)>8<<20 {callErr=errors.New("response too large")}}
- }
- success:=callErr==nil && status>=200 && status<300
+	var body []byte
+	status := 0
+	var callErr error
+	if isMCP(provider) {
+		callCtx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		body, callErr = a.callMCP(callCtx, provider, ep, b.Parameters)
+		cancel()
+		if callErr == nil {
+			status = 200
+		} else {
+			status = 502
+		}
+	} else {
+		var response *http.Response
+		response, callErr = a.client.Do(req)
+		if callErr == nil {
+			status = response.StatusCode
+			body, callErr = io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
+			response.Body.Close()
+			if len(body) > 8<<20 {
+				callErr = errors.New("response too large")
+			}
+		}
+	}
+	success := callErr == nil && status >= 200 && status < 300
 	finishCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds()); e != nil {
@@ -774,8 +879,8 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/transactions", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,amount,kind,note,created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
 	}))
-	m.HandleFunc("POST /api/admin/tools/{id}/sync", a.withUser(true,a.syncMCP))
-	m.HandleFunc("POST /api/admin/tools/{id}/bulk", a.withUser(true,a.bulkMCP))
+	m.HandleFunc("POST /api/admin/tools/{id}/sync", a.withUser(true, a.syncMCP))
+	m.HandleFunc("POST /api/admin/tools/{id}/bulk", a.withUser(true, a.bulkMCP))
 	m.HandleFunc("GET /api/admin/tools", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, true) }))
 	m.HandleFunc("POST /api/admin/tools", a.withUser(true, a.saveTool))
 	m.HandleFunc("GET /api/admin/users", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
