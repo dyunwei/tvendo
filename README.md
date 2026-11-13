@@ -49,7 +49,7 @@ docker compose pull
 docker compose up -d
 ```
 
-打开 http://localhost:8080，用配置的管理员账户登录。添加上游 → 核对参数和价格 → 开放工具 → 给用户充值 → 用户创建平台 API Key。
+打开 `http://localhost:8080`，用配置的管理员账户登录。添加上游 → 核对参数和价格 → 开放工具 → 给用户充值 → 用户创建平台 API Key。
 
 首次镜像与 npm 包将在 `v0.1.0` Release 工作流成功后可用。提前试用可从源码运行 `make source-up`。HTTPS、完整配置、升级及备份见 [部署说明](docs/deployment.md)。
 
