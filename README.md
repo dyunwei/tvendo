@@ -161,6 +161,14 @@ curl http://localhost:8080/v1/run \
 
 ## 验证
 
+GitHub Actions 配置位于 `.github/workflows/ci.yml`，推送到 `main`、提交 Pull Request 或手动触发时运行：
+
+- Node.js 24 前端类型检查与生产构建。
+- Go 1.26 静态分析及 race 测试；自动启动独立的 PostgreSQL 17 / Redis 7，执行单元与集成测试。
+- Docker 多阶段镜像构建验证。
+
+CI 使用临时测试凭据，不需要配置仓库 Secrets；数据库与 Redis 随任务结束销毁。
+
 ```sh
 cd frontend && npm run build
 cd ../backend && go test -buildvcs=false ./...
