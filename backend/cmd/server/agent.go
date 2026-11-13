@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"tvendo/internal/billing"
 )
 
 var buildVersion = "dev"
@@ -31,13 +32,14 @@ func parseToolRef(ref string) (int64, string, error) {
 	return id, string(ep), nil
 }
 func agentError(w http.ResponseWriter, status int, code, message, settlement string, runID int64, requestID string) {
-	writeJSON(w, status, map[string]any{"error": message, "code": code, "settlement": settlement, "id": runID, "request_id": requestID})
+	writeJSON(w, status, map[string]any{"error": message, "code": code, "settlement": settlement, "id": runID, "request_id": requestID, "currency": billing.Currency})
 }
 func agentOK(w http.ResponseWriter, data any) {
 	writeJSON(w, 200, map[string]any{"ok": true, "data": data})
 }
 
 type catalogItem struct {
+	Currency        string          `json:"currency"`
 	Ref             string          `json:"tool_ref"`
 	Name            string          `json:"name"`
 	Provider        string          `json:"provider"`
@@ -84,7 +86,7 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 			if ep.Disabled || ep.Missing {
 				continue
 			}
-			item := catalogItem{Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: strings.TrimSpace(ep.Description + " " + t.Description), Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: ep.Parameters, Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
+			item := catalogItem{Currency: billing.Currency, Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: strings.TrimSpace(ep.Description + " " + t.Description), Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: ep.Parameters, Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
 			if ref := r.PathValue("ref"); ref != "" {
 				if ref == item.Ref {
 					agentOK(w, item)
@@ -129,7 +131,7 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 	if end < len(items) {
 		next = items[end-1].Ref
 	}
-	agentOK(w, map[string]any{"items": page, "next_cursor": next, "currency": "USD"})
+	agentOK(w, map[string]any{"items": page, "next_cursor": next, "currency": billing.Currency})
 }
 func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 	limit, err := pageLimit(r, 20)
@@ -158,7 +160,7 @@ func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, "请求标识无效")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,created_at,request_id FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1)
+	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
 	if err != nil {
 		fail(w, 500, "无法读取调用记录")
 		return
@@ -194,7 +196,7 @@ func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 		_ = json.Unmarshal(items[limit-1], &last)
 		next = strconv.FormatInt(last.ID, 10)
 	}
-	agentOK(w, map[string]any{"items": items, "next_cursor": next})
+	agentOK(w, map[string]any{"items": items, "next_cursor": next, "currency": billing.Currency})
 }
 func (a *App) withAPI(fn func(http.ResponseWriter, *http.Request, User)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +213,7 @@ func (a *App) agentBudget(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	reset := time.Now().UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
-	agentOK(w, map[string]any{"daily_limit_micros": u.DailyLimit, "call_limit_micros": u.CallLimit, "daily_enabled": u.DailyEnabled, "call_enabled": u.CallEnabled, "spent_micros": spent, "held_micros": held, "resets_at": reset, "currency": "USD"})
+	agentOK(w, map[string]any{"daily_limit_micros": u.DailyLimit, "call_limit_micros": u.CallLimit, "daily_enabled": u.DailyEnabled, "call_enabled": u.CallEnabled, "spent_micros": spent, "held_micros": held, "resets_at": reset, "currency": billing.Currency})
 }
 
 // Serve only generated release filenames. Never expose arbitrary local files.
@@ -224,7 +226,7 @@ func (a *App) cliAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(env("CLI_DIST", "../distribution/dist"), name))
 }
 func (a *App) cliInfo() map[string]any {
-	info := map[string]any{"brand": "T vendo", "api_version": 1, "version": buildVersion, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
+	info := map[string]any{"brand": "T vendo", "api_version": 1, "version": buildVersion, "currency": billing.Currency, "micros_per_unit": 1000000, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
 	raw, err := os.ReadFile(filepath.Join(env("CLI_DIST", "../distribution/dist"), "manifest.json"))
 	var manifest struct {
 		Version string `json:"version"`

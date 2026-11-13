@@ -3,7 +3,7 @@
 # T vendo
 
 **让 Agent 方便地发现和调用工具的自托管平台**<br>
-统一接入 HTTP 与 MCP 工具，按次计费，使用同一个余额与预算。
+统一接入 HTTP 与 MCP 工具，人民币计价、按次计费，使用同一个余额与预算。
 
 [![CI](https://github.com/dyunwei/tvendo/actions/workflows/ci.yml/badge.svg)](https://github.com/dyunwei/tvendo/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/dyunwei/tvendo)](https://github.com/dyunwei/tvendo/releases)
@@ -19,7 +19,7 @@
 
 - **面向 Agent**：用中文查找工具，查看参数和价格，通过 CLI 或 API 调用。
 - **统一接入**：管理员配置 HTTP / JSON 或远程 MCP 上游，用户使用平台密钥。
-- **费用可控**：固定单次售价、统一余额、预算限制和调用记录。
+- **费用可控**：人民币固定单次售价、统一余额、预算限制和调用记录。
 
 ## 功能
 

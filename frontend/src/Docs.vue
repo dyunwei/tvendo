@@ -116,8 +116,9 @@ const items = [
         <pre>Authorization: Bearer &lt;TVENDO_API_KEY&gt;</pre>
         <h2><span class="method">GET</span> /v1/tools</h2>
         <p>
-          返回已启用工具、接口 ID、调用方法、参数示例和售价。金额为整数微美元：1
-          美元 = 1,000,000 微美元。
+          返回已启用工具、接口
+          ID、调用方法、参数示例和售价。金额按人民币（CNY）计价，使用整数微元：1
+          元 = 1,000,000 微元。
         </p>
         <pre>
 { "slug": "tinyfish", "endpoints": [

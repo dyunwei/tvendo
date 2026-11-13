@@ -1,3 +1,4 @@
+-- Monetary values are integer micro-yuan: 1 CNY = 1,000,000.
 CREATE TABLE IF NOT EXISTS users (
  id BIGSERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
  password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user', balance BIGINT NOT NULL DEFAULT 0 CHECK(balance>=0),

@@ -188,7 +188,7 @@ const faqs = [
           <div class="terminal-content">
             <p><span class="dim">$</span> 为我寻找关于 AI Agent 的最新信息</p>
             <p class="dim">› GET /v1/tools</p>
-            <p>↳ TinyFish · search · $0.001 / call</p>
+            <p>↳ TinyFish · search · ¥0.001 / call</p>
             <p class="dim">› POST /v1/run</p>
             <p class="dim">
               &nbsp; { tool: "tinyfish", endpoint: "search", parameters: { ... }

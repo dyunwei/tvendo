@@ -112,14 +112,14 @@ async function bulk(action: Record<string, unknown>, ids = selected.value) {
 function setSinglePrice(ep: Endpoint) {
   const value = singlePrices.value[ep.id] ?? effective(ep) / 1e6;
   if (!Number.isFinite(value) || value < 0 || value > 1000) {
-    error.value = "售价需在 0–1000 美元内";
+    error.value = "售价需在 0–1000 元内";
     return;
   }
   bulk({ price_micros: Math.round(value * 1e6) }, [ep.id]);
 }
 function setPrice(ids = selected.value) {
   if (!Number.isFinite(price.value) || price.value < 0 || price.value > 1000) {
-    error.value = "售价需在 0–1000 美元内";
+    error.value = "售价需在 0–1000 元内";
     return;
   }
   bulk({ price_micros: Math.round(price.value * 1e6) }, ids);
@@ -203,7 +203,7 @@ function setPrice(ids = selected.value) {
     </div>
     <div class="mcp-price-bar">
       <label
-        >单次售价（USD）<input
+        >单次售价（元）<input
           v-model.number="price"
           type="number"
           min="0"

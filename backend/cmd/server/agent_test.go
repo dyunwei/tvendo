@@ -30,6 +30,17 @@ func TestSkillAndMissingRelease(t *testing.T) {
 	for _, path := range []string{"/SKILL.md", "/v1/info"} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if path == "/v1/info" {
+			var out struct {
+				Data struct {
+					Currency string `json:"currency"`
+					Micros   int    `json:"micros_per_unit"`
+				} `json:"data"`
+			}
+			if json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Data.Currency != "CNY" || out.Data.Micros != 1000000 {
+				t.Fatal("invalid billing denomination")
+			}
+		}
 		if w.Code != 200 || strings.Contains(w.Body.String(), "{{BASE}}") {
 			t.Fatalf("%s %d %s", path, w.Code, w.Body.String())
 		}

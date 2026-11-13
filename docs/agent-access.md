@@ -75,7 +75,7 @@ tvendo run '<tool_ref>' --input-file input.json --max-cost-micros 1000 --output 
 
 输入来源三选一：`--input '<JSON>'`、`--input-file <文件>`、`--input-file -`（stdin）。输入必须为 JSON 对象。`--output` 保存结果正文，不覆盖已有文件；文件已存在时在收费调用前终止。
 
-金额单位为整数微美元，1000000 = 1 USD。`--max-cost-micros` 在服务端预留余额前检查实际单次价格。Agent 应在用户授权的任务和费用范围内操作，平台账户预算不自动代表用户同意消费。多次调用需自行累计任务费用。
+金额单位为整数微元，1000000 = 1 CNY。`--max-cost-micros` 在服务端预留余额前检查实际单次价格。Agent 应在用户授权的任务和费用范围内操作，平台账户预算不自动代表用户同意消费。多次调用需自行累计任务费用。
 
 ## 失败与退出码
 

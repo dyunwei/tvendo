@@ -2,6 +2,8 @@
 
 API 使用平台密钥，通过 `Authorization: Bearer <key>` 鉴权。密钥在 `/app/keys` 创建；不可用供应商密钥代替。账户数据仅对该账户开放。
 
+所有金额均为人民币（CNY），以整数微元表示：`1 元 = 1,000,000 微元`。`price_micros`、`cost_micros` 等字段名保留，单位统一为微元。API 响应头 `X-Tvendo-Currency: CNY` 也用于标识旧数组接口的币种。
+
 ## 基础调用与旧版兼容
 
 ```sh
@@ -36,10 +38,10 @@ curl http://localhost:8080/v1/run \
 | `GET /v1/catalog/{tool_ref}` | 对引用做 URL 路径段编码；返回 Schema、示例、类型及价格 |
 | `GET /v1/runs` | limit 默认 20，范围 1–50；cursor 分页；request_id 可筛选 |
 | `GET /v1/runs/{id}` | 本账户单次调用记录，其他账户记录返回 404 |
-| `GET /v1/balance` | balance_micros 与 currency=USD |
+| `GET /v1/balance` | balance_micros 与 currency=CNY |
 | `GET /v1/budgets` | daily_limit_micros、call_limit_micros、daily_enabled、call_enabled、spent_micros、held_micros、resets_at、currency |
 
-查询成功返回 `{ok:true,data:...}`。目录与调用记录列表的 data 包含 `items`、`next_cursor`；空游标表示没有后页。目录条目含 `tool_ref`、name、provider、description、price_micros、schema_available；详情额外含 `input_schema`、`input_example`、`upstream_type`（若已配置）。
+查询成功返回 `{ok:true,data:...}`。目录与调用记录列表的 data 包含 `items`、`next_cursor`；空游标表示没有后页。目录条目含 `currency`、`tool_ref`、name、provider、description、price_micros、schema_available；详情额外含 `input_schema`、`input_example`、`upstream_type`（若已配置）。
 
 目录只显示已开放提供商下已启用、未被上游移除的工具。搜索按名称和描述匹配全部空格分隔关键词。`tool_ref` 是稳定的不透明引用，不依赖显示名称，不能自行拼接。
 
@@ -55,7 +57,7 @@ curl http://localhost:8080/v1/run \
 
 `POST /v1/run` 保留旧 tool / endpoint 参数形式，与 tool_ref 互斥。`max_cost_micros` 为可选非负整数，实际售价超限时不创建调用、不扣费；不传时仍执行账户预算限制。
 
-建议客户端在调用前生成 `X-Request-ID`，要求为 8–80 位字母、数字、下划线或连字符。响应头返回该标识，已创建的调用记录也会保存它。成功体为 `{id,cost_micros,data,request_id}`。标识仅用于查询核对，不提供幂等去重。
+建议客户端在调用前生成 `X-Request-ID`，要求为 8–80 位字母、数字、下划线或连字符。响应头返回该标识，已创建的调用记录也会保存它。成功体为 `{id,cost_micros,data,request_id,currency}`。标识仅用于查询核对，不提供幂等去重。
 
 ## 错误和结算
 

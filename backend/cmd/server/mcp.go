@@ -312,7 +312,7 @@ func applyBulk(t Tool, b BulkMCPRequest) ([]Endpoint, error) {
 		return nil, errors.New("请选择 1–5000 个工具")
 	}
 	if b.Price != nil && (*b.Price < 0 || *b.Price > 1000000000) || b.Price != nil && b.UseDefault {
-		return nil, errors.New("售价需在 0–1000 美元内，不能同时设置单独售价和默认售价")
+		return nil, errors.New("售价需在 0–1000 元内，不能同时设置单独售价和默认售价")
 	}
 	if b.Enabled == nil && b.Price == nil && !b.UseDefault {
 		return nil, errors.New("请选择操作")

@@ -124,6 +124,9 @@ func TestIntegrationBilling(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
+		if w.Header().Get("X-Tvendo-Currency") != "CNY" {
+			t.Error("API currency header missing")
+		}
 		var out map[string]any
 		_ = json.Unmarshal(w.Body.Bytes(), &out)
 		return w.Code, out, w.Result().Cookies()
@@ -172,12 +175,18 @@ func TestIntegrationBilling(t *testing.T) {
 	code, out, _ = request("GET", "/v1/catalog?q=OK&limit=1", nil, nil, "", apiKey)
 	require(code, 200, out)
 	catalog := out["data"].(map[string]any)
+	if catalog["currency"] != "CNY" {
+		t.Fatal("catalog currency mismatch")
+	}
 	if len(catalog["items"].([]any)) != 1 {
 		t.Fatal("tool search failed")
 	}
 	ref := catalog["items"].([]any)[0].(map[string]any)["tool_ref"].(string)
 	code, out, _ = request("GET", "/v1/catalog/"+ref, nil, nil, "", apiKey)
 	require(code, 200, out)
+	if out["data"].(map[string]any)["currency"] != "CNY" {
+		t.Fatal("detail currency mismatch")
+	}
 	if out["data"].(map[string]any)["price_micros"] != float64(1000000) {
 		t.Fatal("catalog price mismatch")
 	}
@@ -199,24 +208,33 @@ func TestIntegrationBilling(t *testing.T) {
 	require(code, 502, out)
 	failedID := int64(out["id"].(float64))
 	requestID := out["request_id"].(string)
+	if out["currency"] != "CNY" {
+		t.Fatal("refund currency mismatch")
+	}
 	if out["settlement"] != "refunded" {
 		t.Fatal("refund state missing")
 	}
 	code, out, _ = request("GET", "/v1/runs?request_id="+requestID, nil, nil, "", apiKey)
 	require(code, 200, out)
 	records := out["data"].(map[string]any)["items"].([]any)
-	if len(records) != 1 || records[0].(map[string]any)["status"] != "failed" {
+	if len(records) != 1 || records[0].(map[string]any)["currency"] != "CNY" || records[0].(map[string]any)["status"] != "failed" {
 		t.Fatal("request correlation failed")
 	}
 	code, out, _ = request("GET", fmt.Sprintf("/v1/runs/%d", failedID), nil, nil, "", apiKey)
 	require(code, 200, out)
 	code, out, _ = request("GET", "/v1/balance", nil, nil, "", apiKey)
 	require(code, 200, out)
+	if out["data"].(map[string]any)["currency"] != "CNY" {
+		t.Fatal("balance currency mismatch")
+	}
 	if out["data"].(map[string]any)["balance_micros"] != float64(5500000) {
 		t.Fatal("API balance mismatch")
 	}
 	code, out, _ = request("GET", "/v1/budgets", nil, nil, "", apiKey)
 	require(code, 200, out)
+	if out["data"].(map[string]any)["currency"] != "CNY" {
+		t.Fatal("budget currency mismatch")
+	}
 	if out["data"].(map[string]any)["resets_at"] == nil {
 		t.Fatal("budget reset absent")
 	}
@@ -304,6 +322,10 @@ func TestIntegrationBilling(t *testing.T) {
 	if e = a.bootstrap(ctx); e != nil {
 		t.Fatal(e)
 	}
+	u, _ = a.user(ctx, userID)
+	if u.Balance != 500000 || u.Currency != "CNY" {
+		t.Fatal("bootstrap changed balance or currency")
+	}
 	code, out, _ = request("POST", "/api/auth/login", map[string]string{"email": "admin@test.local", "password": "test-admin-password-1234"}, nil, "", "")
 	require(code, 200, out)
 
@@ -367,6 +389,9 @@ func TestIntegrationBilling(t *testing.T) {
 	require(code, 409, out)
 	code, out, _ = request("POST", "/v1/run", remoteRun("one"), nil, "", mcpKey)
 	require(code, 200, out)
+	if out["currency"] != "CNY" {
+		t.Fatal("run currency mismatch")
+	}
 	if out["cost_micros"].(float64) != 50000 {
 		t.Fatal("default MCP price not charged")
 	}

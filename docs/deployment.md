@@ -40,6 +40,8 @@ PostgreSQL 与 Redis 不向宿主机暴露端口。数据分别保存在 Compose
 
 ## 升级
 
+平台统一使用人民币（CNY），金额为整数微元（1 元 = 1,000,000 微元）。首版发布前的美元标识已移除；经确认现有数据均为测试数据，本次保留余额、售价、预算和流水的原整数值，不执行汇率换算或金额重写。
+
 1. 备份数据库与原 `ENCRYPTION_KEY`，阅读目标版本 [更新日志](../CHANGELOG.md)。
 2. 在 `.env` 更新 `TVENDO_VERSION`，保留原数据库密码、加密密钥与数据卷。
 3. 执行 `docker compose pull app`，再执行 `docker compose up -d app`。

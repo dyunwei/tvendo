@@ -336,7 +336,7 @@ function downloadExample() {
         </table>
         <div class="table-footer">
           显示最近 1000 位用户中的 {{ shownUsers.length }} 位<span
-            >充值金额以美元计</span
+            >充值金额以元计</span
           >
         </div>
       </div></template
@@ -578,7 +578,7 @@ function downloadExample() {
                 </select></label
               >
               <label v-if="mcpEditing"
-                >默认单次售价（USD）<input
+                >默认单次售价（元）<input
                   v-model.number="defaultPrice"
                   type="number"
                   min="0"
@@ -658,7 +658,7 @@ function downloadExample() {
               >
               <template v-else>
                 <div class="alert">
-                  售价使用整数微美元：<strong>1000 = $0.001</strong
+                  售价使用整数微元：<strong>1000 = ¥0.001</strong
                   >。每个接口单次计费，参数示例将显示给用户。
                 </div>
                 <div class="json-toolbar">
@@ -698,7 +698,7 @@ function downloadExample() {
                 aria-label="资源 JSON 配置"
               /><small
                 >示例：[ { "name": "Cloud browser", "description":
-                "云浏览器服务说明", "price": "$0.002 / 分钟" } ]</small
+                "云浏览器服务说明", "price": "¥0.002 / 分钟" } ]</small
               >
             </div>
             <footer class="editor-footer">
@@ -745,7 +745,7 @@ function downloadExample() {
             当前余额 <strong>{{ money(topupUser.balance) }}</strong>
           </div>
           <label
-            >入账金额（USD）<input
+            >入账金额（元）<input
               v-model.number="amount"
               type="number"
               min="0.000001"

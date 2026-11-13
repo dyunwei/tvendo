@@ -27,6 +27,6 @@ tvendo wallet balance --json
 
 `setup --server <url> --key-stdin` 支持从标准输入保存密钥。`TVENDO_CONFIG` 可指定本地配置文件。切换服务地址时请为新服务配置密钥。
 
-金额单位为整数微美元：1000000 = 1 USD。调用同步执行，不自动重试；超时或响应丢失时，使用输出的请求标识运行 `runs list --request-id <id>` 核对。`--output` 不覆盖现有文件。调用记录用于核账，不恢复历史结果正文。
+金额单位为整数微元：1000000 = 1 CNY。调用同步执行，不自动重试；超时或响应丢失时，使用输出的请求标识运行 `runs list --request-id <id>` 核对。`--output` 不覆盖现有文件。调用记录用于核账，不恢复历史结果正文。
 
 全部命令见 `tvendo --help`。详细说明见 [Agent 接入文档](https://github.com/dyunwei/tvendo/blob/main/docs/agent-access.md)，平台源码见 [GitHub](https://github.com/dyunwei/tvendo)。许可证随包附带于 LICENSE。

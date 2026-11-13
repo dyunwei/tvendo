@@ -22,6 +22,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"tvendo/internal/billing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -40,6 +41,7 @@ type App struct {
 	client    *http.Client
 }
 type User struct {
+	Currency     string `json:"currency"`
 	ID           int64  `json:"id"`
 	Email        string `json:"email"`
 	Name         string `json:"name"`
@@ -151,6 +153,7 @@ func (a *App) decrypt(s string) (string, error) {
 func (a *App) user(ctx context.Context, id int64) (User, error) {
 	var u User
 	e := a.db.QueryRow(ctx, `SELECT id,email,name,role,balance,daily_limit,call_limit,daily_enabled,call_enabled FROM users WHERE id=$1`, id).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Balance, &u.DailyLimit, &u.CallLimit, &u.DailyEnabled, &u.CallEnabled)
+	u.Currency = billing.Currency
 	return u, e
 }
 func (a *App) rate(r *http.Request, prefix string, max int64) bool {
@@ -349,7 +352,7 @@ func validateTool(t Tool) error {
 		return errors.New("不支持的上游类型")
 	}
 	if t.DefaultPrice < 0 || t.DefaultPrice > 1000000000 {
-		return errors.New("默认售价需在 0–1000 美元内")
+		return errors.New("默认售价需在 0–1000 元内")
 	}
 	if !validSlug(t.Slug) || strings.TrimSpace(t.Name) == "" || len(t.Name) > 100 || t.Category == "" {
 		return errors.New("请填写工具名称、分类及有效标识（小写字母、数字、-、_）")
@@ -379,7 +382,7 @@ func validateTool(t Tool) error {
 	ids := map[string]bool{}
 	for _, ep := range t.Endpoints {
 		if (t.UpstreamType == "http" || t.UpstreamType == "") && !validSlug(ep.ID) || ep.ID == "" || ids[ep.ID] || ep.Name == "" || ep.Price < 0 || ep.Price > 1000000000 {
-			return errors.New("接口标识需唯一且有效，名称必填，售价需在 0–1000 美元内")
+			return errors.New("接口标识需唯一且有效，名称必填，售价需在 0–1000 元内")
 		}
 		ids[ep.ID] = true
 		if isMCP(t) {
@@ -543,7 +546,7 @@ func (a *App) budget(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 500, "预算读取失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"daily_limit": u.DailyLimit, "call_limit": u.CallLimit, "daily_enabled": u.DailyEnabled, "call_enabled": u.CallEnabled, "spent": spent, "held": held})
+	writeJSON(w, 200, map[string]any{"daily_limit": u.DailyLimit, "call_limit": u.CallLimit, "daily_enabled": u.DailyEnabled, "call_enabled": u.CallEnabled, "spent": spent, "held": held, "currency": billing.Currency})
 }
 func (a *App) topup(w http.ResponseWriter, r *http.Request, u User) {
 	var b struct {
@@ -555,7 +558,7 @@ func (a *App) topup(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	if b.Amount <= 0 || b.Amount > 1000000000000 || len(b.Note) > 500 {
-		fail(w, 400, "充值金额需大于 0 且不超过 100 万美元，备注最多 500 字节")
+		fail(w, 400, "充值金额需大于 0 且不超过 100 万元，备注最多 500 字节")
 		return
 	}
 	tx, e := a.db.Begin(r.Context())
@@ -580,7 +583,7 @@ func (a *App) topup(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 500, "充值失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"balance": balance})
+	writeJSON(w, 200, map[string]any{"balance": balance, "currency": billing.Currency})
 }
 
 // Resolve and validate every connection, including DNS answers, to prevent access to private services.
@@ -828,7 +831,7 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(body, &result) != nil {
 		result = string(body)
 	}
-	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result, "request_id": requestID})
+	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result, "request_id": requestID, "currency": billing.Currency})
 }
 func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64) error {
 	tx, e := a.db.Begin(ctx)
@@ -944,7 +947,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /v1/runs/{id}", a.withAPI(a.agentRuns))
 	m.HandleFunc("GET /v1/budgets", a.withAPI(a.agentBudget))
 	m.HandleFunc("GET /v1/balance", a.withAPI(func(w http.ResponseWriter, r *http.Request, u User) {
-		agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": "USD"})
+		agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": billing.Currency})
 	}))
 	m.HandleFunc("GET /cli/install.sh", a.installer)
 	m.HandleFunc("GET /cli/{name}", a.cliAsset)
@@ -969,6 +972,9 @@ func (a *App) routes() http.Handler {
 		}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/v1/") {
+			w.Header().Set("X-Tvendo-Currency", billing.Currency)
+		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")

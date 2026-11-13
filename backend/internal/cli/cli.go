@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"tvendo/internal/billing"
 )
 
 type config struct {
@@ -32,6 +33,7 @@ type failure struct {
 	Exit       int    `json:"-"`
 	Result     any    `json:"result,omitempty"`
 	Cost       any    `json:"cost_micros,omitempty"`
+	Currency   string `json:"currency,omitempty"`
 }
 
 func (f *failure) Error() string { return f.Message }
@@ -100,7 +102,7 @@ const help = `Tvendo：让 Agent 搜索并调用工具
 
 所有命令支持 --json、--help。--version 查看版本。
 配置：TVENDO_SERVER、TVENDO_API_KEY；TVENDO_CONFIG 可指定配置文件。
-金额单位为整数微美元，1000000 = 1 USD。run 不会自动重试。
+金额单位为整数微元，1000000 = 1 ` + billing.Currency + `（人民币）。run 不会自动重试。
 `
 
 func Main(args []string, in io.Reader, out, stderr io.Writer, version string) int {
@@ -405,6 +407,9 @@ func (c *apiClient) call(method, path string, body any, requestID string) (map[s
 	if message, ok := data["error"].(string); ok {
 		f.Message = strings.ReplaceAll(message, c.key, "[已隐藏]")
 	}
+	if currency, ok := data["currency"].(string); ok {
+		f.Currency = currency
+	}
 	if code, ok := data["code"].(string); ok {
 		f.Code = code
 	}
@@ -485,7 +490,7 @@ func run(c command, ref string, in io.Reader, stderr io.Writer, client *apiClien
 	if s, ok := c.flags["max-cost-micros"]; ok {
 		n, e := strconv.ParseInt(s, 10, 64)
 		if e != nil || n < 0 {
-			return nil, bad("费用上限须为非负整数微美元")
+			return nil, bad("费用上限须为非负整数微元")
 		}
 		body["max_cost_micros"] = n
 	}
@@ -515,13 +520,17 @@ func run(c command, ref string, in io.Reader, stderr io.Writer, client *apiClien
 	if e != nil {
 		return nil, e
 	}
+	currency, _ := res["currency"].(string)
 	result := map[string]any{"run_id": res["id"], "request_id": requestID, "status": "success", "cost_micros": res["cost_micros"], "result": res["data"]}
+	if currency != "" {
+		result["currency"] = currency
+	}
 	if output != nil {
 		encErr := json.NewEncoder(output).Encode(res["data"])
 		syncErr := output.Sync()
 		closeErr := output.Close()
 		if encErr != nil || syncErr != nil || closeErr != nil {
-			return nil, &failure{Code: "OUTPUT_WRITE_FAILED", Message: "调用已成功但保存结果失败，勿重新执行收费调用", RunID: res["id"], RequestID: requestID, Settlement: "charged", Exit: 1, Result: res["data"], Cost: res["cost_micros"]}
+			return nil, &failure{Code: "OUTPUT_WRITE_FAILED", Message: "调用已成功但保存结果失败，勿重新执行收费调用", RunID: res["id"], RequestID: requestID, Settlement: "charged", Exit: 1, Result: res["data"], Cost: res["cost_micros"], Currency: currency}
 		}
 		completed = true
 	}

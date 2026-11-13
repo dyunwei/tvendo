@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 export interface User {
+  currency: "CNY";
   id: number;
   email: string;
   name: string;
@@ -83,13 +84,12 @@ export async function refreshSession() {
   }
 }
 export function money(micros: number, digits = 2) {
-  return (
-    "$" +
-    (Number(micros || 0) / 1e6).toLocaleString("en-US", {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: Math.max(digits, 6),
-    })
-  );
+  return (Number(micros || 0) / 1e6).toLocaleString("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: Math.max(digits, 6),
+  });
 }
 export function date(v: string | null) {
   return v

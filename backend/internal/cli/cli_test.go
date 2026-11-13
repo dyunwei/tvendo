@@ -81,12 +81,15 @@ func TestRunOutputAndNoRetry(t *testing.T) {
 		if b["tool_ref"] != "t1.b2s" || b["max_cost_micros"] != float64(7) {
 			t.Errorf("input: %v", b)
 		}
-		w.Write([]byte(`{"id":42,"cost_micros":7,"data":{"value":9007199254740993}}`))
+		w.Write([]byte(`{"id":42,"cost_micros":7,"currency":"CNY","data":{"value":9007199254740993}}`))
 	}))
 	defer srv.Close()
 	env(t, srv.URL)
 	path := filepath.Join(t.TempDir(), "result.json")
 	code, data, stderr := invoke("run", "t1.b2s", "--input", `{"query":"中文"}`, "--max-cost-micros", "7", "--output", path)
+	if code == 0 && data["data"].(map[string]any)["currency"] != "CNY" {
+		t.Fatal("run omitted server currency")
+	}
 	if code != 0 || !strings.Contains(stderr, "请求标识") {
 		t.Fatalf("run: %d %v", code, data)
 	}

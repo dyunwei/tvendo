@@ -4,7 +4,7 @@
 
 - 自托管网页控制台、API Key、管理员 HTTP / MCP 上游管理。
 - 中文 Skill、Go CLI、工具文本搜索与参数详情。
-- 固定单次计费、余额预留、成功结算、失败退款、单次与每日预算。
+- 人民币（CNY）固定单次计费，精度为微元；余额预留、成功结算、失败退款、单次与每日预算。
 - MCP Streamable HTTP 和旧版 HTTP+SSE 上游；平台对用户提供 REST API。
 - CLI 提供 Linux / macOS / Windows 的 amd64 / arm64 程序。Docker 发布目标为 Linux amd64 / arm64。
 

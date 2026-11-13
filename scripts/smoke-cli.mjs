@@ -34,7 +34,7 @@ const server = createServer((req, res) => {
     assert.ok(req.headers['x-request-id']);
     let body = ''; req.on('data', chunk => body += chunk); req.on('end', () => {
       const input = JSON.parse(body); assert.equal(input.tool_ref, 't1.b2s'); assert.equal(input.max_cost_micros, 10);
-      res.end(JSON.stringify({ id: 42, cost_micros: 10, data: { items: ['中文结果'] } }));
+      res.end(JSON.stringify({ id: 42, cost_micros: 10, currency: 'CNY', data: { items: ['中文结果'] } }));
     });
   } else { res.writeHead(404); res.end('{}'); }
 });
@@ -58,7 +58,7 @@ try {
   assert.equal(JSON.parse(await command(binary, ['doctor', '--json'])).ok, true);
   const output = join(temp, 'result.json');
   const result = JSON.parse(await command(binary, ['run', 't1.b2s', '--input', '{"query":"测试"}', '--max-cost-micros', '10', '--output', output, '--json']));
-  assert.equal(result.data.run_id, 42); assert.deepEqual(JSON.parse(readFileSync(output)), { items: ['中文结果'] });
+  assert.equal(result.data.run_id, 42); assert.equal(result.data.currency, 'CNY'); assert.deepEqual(JSON.parse(readFileSync(output)), { items: ['中文结果'] });
   await command(binary, ['run', 't1.b2s', '--output', output, '--json'], 2);
   assert.equal(calls, 1);
   tamper = true;

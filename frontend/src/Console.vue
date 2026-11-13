@@ -376,7 +376,7 @@ const statusLabel = (s: string) =>
           :class="{ chosen: page === 'wallet' }"
           ><Wallet :size="28" />
           <div>
-            <small>AVAILABLE BALANCE</small
+            <small>AVAILABLE BALANCE · CNY</small
             ><strong>{{ money(session.user?.balance || 0) }}</strong>
           </div>
           <ChevronRight :size="16"
@@ -779,7 +779,7 @@ const statusLabel = (s: string) =>
               <p>给每一次探索，设定一个安心的边界。</p>
             </div>
             <span class="subtle-tag"
-              ><ShieldCheck :size="14" />账户级消费控制</span
+              ><ShieldCheck :size="14" />人民币（CNY）· 账户级消费控制</span
             >
           </div>
           <form @submit.prevent="saveBudget">
@@ -799,7 +799,7 @@ const statusLabel = (s: string) =>
                   /></label>
                 </header>
                 <div class="budget-amount">
-                  <span>$</span
+                  <span>¥</span
                   ><input
                     v-model.number="dailyInput"
                     type="number"
@@ -836,7 +836,7 @@ const statusLabel = (s: string) =>
                   /></label>
                 </header>
                 <div class="budget-amount">
-                  <span>$</span
+                  <span>¥</span
                   ><input
                     v-model.number="callInput"
                     type="number"
