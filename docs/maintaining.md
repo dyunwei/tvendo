@@ -75,7 +75,9 @@ Token 应属于 `dyunwei` 账号，未过期，并在 npm 网站的 Packages and
 
 - Docker Hub：构建 Linux amd64 / arm64 镜像，复用已测试的 CLI 产物。
 - npm：优先用 NPM_TOKEN，未配置时用 OIDC 发布同一份 npm tarball。
-- GitHub Release：附加六平台 CLI、npm tarball、SHA256SUMS、manifest.json、CLI-README.md、LICENSE 和 COPYING.GPL-3。
+- GitHub Release：附加六平台 CLI、npm tarball、SHA256SUMS、manifest.json、CLI-README.md、LICENSE、COPYING.GPL-3，以及部署用的 compose.yaml 和 env.example。
+
+部署附件从该标签的源码生成：compose.yaml 原样保留镜像源等配置，仓库中的 .env.example 仅将 TVENDO_VERSION 固定为本次 VERSION，并以 env.example 附件名上传，其余保持模板内容。不会上传本地 .env。README 使用 `releases/latest/download/` 获取最新正式版的附件，后续发版无需修改下载链接；预发布附件可通过具体标签下载。GitHub 会重命名带前导点的附件，因此附件使用 env.example，下载时保存为 .env，见 [GitHub 附件命名说明](https://docs.github.com/en/rest/releases/assets#upload-a-release-asset)。
 
 Docker 本地构建默认自己生成 CLI。发布构建设置 `CLI_SOURCE=cli-release`，使用下载到 `distribution/dist` 的同一份产物，并在镜像构建中再次验证 VERSION 和 SHA-256。
 

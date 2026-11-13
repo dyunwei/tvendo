@@ -6,9 +6,13 @@
 
 ```sh
 mkdir tvendo && cd tvendo
-curl -fsSLO https://raw.githubusercontent.com/dyunwei/tvendo/v0.1.0/compose.yaml
-curl -fsSL https://raw.githubusercontent.com/dyunwei/tvendo/v0.1.0/.env.example -o .env
+curl -fsSLO https://github.com/dyunwei/tvendo/releases/latest/download/compose.yaml
+curl -fsSL https://github.com/dyunwei/tvendo/releases/latest/download/env.example -o .env
 ```
+
+附件来自最新正式版，配置模板中的 `TVENDO_VERSION` 已固定为该 Release 的版本。需要旧版本时，将 `releases/latest/download/` 换为 `releases/download/v0.1.0/` 等具体标签路径。
+
+默认 Compose 通过 `docker.1ms.run` 镜像源拉取应用、PostgreSQL 和 Redis；官方发布仍推送 Docker Hub。需要直连 Docker Hub 时，将三个 image 分别改为 `dyunwei/tvendo:${TVENDO_VERSION:-latest}`、`postgres:17-alpine` 和 `redis:7-alpine`。
 
 编辑 `.env`：
 
