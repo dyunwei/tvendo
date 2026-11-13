@@ -8,7 +8,7 @@ export function verifyCLI(directory, version = readVersion()) {
   if (manifest.version !== version || manifest.npm_package !== packageName || manifest.package !== tarballName(version)) throw new Error('CLI 清单中的版本或包名不符');
   const binaries = ['linux','darwin','windows'].flatMap(os => ['amd64','arm64'].map(arch => `tvendo-${os}-${arch}${os === 'windows' ? '.exe' : ''}`));
   if (JSON.stringify(manifest.platforms) !== JSON.stringify(binaries)) throw new Error('CLI 平台清单不符');
-  const expected = new Set([...binaries, manifest.package, 'LICENSE', 'CLI-README.md']);
+  const expected = new Set([...binaries, manifest.package, 'LICENSE', 'COPYING.GPL-3', 'CLI-README.md']);
   const checks = readFileSync(join(directory, 'SHA256SUMS'), 'utf8').trim().split('\n');
   for (const line of checks) {
     const match = /^([a-f0-9]{64})  ([A-Za-z0-9._-]+)$/.exec(line);

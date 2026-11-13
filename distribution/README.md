@@ -29,4 +29,4 @@ tvendo wallet balance --json
 
 金额单位为整数微元：1000000 = 1 CNY。调用同步执行，不自动重试；超时或响应丢失时，使用输出的请求标识运行 `runs list --request-id <id>` 核对。`--output` 不覆盖现有文件。调用记录用于核账，不恢复历史结果正文。
 
-全部命令见 `tvendo --help`。详细说明见 [Agent 接入文档](https://github.com/dyunwei/tvendo/blob/main/docs/agent-access.md)，平台源码见 [GitHub](https://github.com/dyunwei/tvendo)。许可证随包附带于 LICENSE。
+全部命令见 `tvendo --help`。详细说明见 [Agent 接入文档](https://github.com/dyunwei/tvendo/blob/main/docs/agent-access.md)，平台源码见 [GitHub](https://github.com/dyunwei/tvendo)。本项目采用 GNU LGPL v3（LGPL-3.0-only），包内附带 LICENSE 及 COPYING.GPL-3。

@@ -30,7 +30,7 @@ FROM --platform=$BUILDPLATFORM node:24-alpine AS cli-build
 WORKDIR /src
 COPY --from=cli-binaries /out/cli /out/cli
 COPY distribution/ ./distribution/
-COPY VERSION LICENSE ./
+COPY VERSION LICENSE COPYING.GPL-3 ./
 RUN node distribution/package.mjs /out/cli
 
 # Release builds consume the already tested npm and binary artifacts byte-for-byte.
@@ -50,8 +50,9 @@ WORKDIR /app
 COPY --from=backend /out/bin/server /app/bin/server
 COPY --from=frontend /src/frontend/dist /app/frontend
 COPY --from=cli-assets /out/cli /app/cli
-COPY LICENSE /app/LICENSE
+COPY LICENSE COPYING.GPL-3 /app/
 ENV FRONTEND_DIST=/app/frontend CLI_DIST=/app/cli
+LABEL org.opencontainers.image.licenses="LGPL-3.0-only"
 LABEL org.opencontainers.image.source="https://github.com/dyunwei/tvendo"
 USER app
 EXPOSE 8080

@@ -9,7 +9,7 @@
 [![Release](https://img.shields.io/github/v/release/dyunwei/tvendo)](https://github.com/dyunwei/tvendo/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/dyunwei/tvendo)](https://hub.docker.com/r/dyunwei/tvendo)
 [![npm](https://img.shields.io/npm/v/@dyunwei/tvendo)](https://www.npmjs.com/package/@dyunwei/tvendo)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-LGPL--3.0-blue)](LICENSE)
 
 ![Tvendo 控制台](docs/screenshots/console.png)
 
@@ -83,4 +83,6 @@ tvendo tools search '网页搜索' --json
 
 ## 许可证
 
-采用 [GNU AGPL v3](LICENSE)。
+Copyright © 2026 dyunwei。
+
+本项目采用 [GNU LGPL v3](LICENSE)（`LGPL-3.0-only`），附带其引用的 [GNU GPL v3 条款](COPYING.GPL-3)。

@@ -75,7 +75,7 @@ Token 应属于 `dyunwei` 账号，未过期，并在 npm 网站的 Packages and
 
 - Docker Hub：构建 Linux amd64 / arm64 镜像，复用已测试的 CLI 产物。
 - npm：优先用 NPM_TOKEN，未配置时用 OIDC 发布同一份 npm tarball。
-- GitHub Release：附加六平台 CLI、npm tarball、SHA256SUMS、manifest.json、CLI-README.md 和 LICENSE。
+- GitHub Release：附加六平台 CLI、npm tarball、SHA256SUMS、manifest.json、CLI-README.md、LICENSE 和 COPYING.GPL-3。
 
 Docker 本地构建默认自己生成 CLI。发布构建设置 `CLI_SOURCE=cli-release`，使用下载到 `distribution/dist` 的同一份产物，并在镜像构建中再次验证 VERSION 和 SHA-256。
 
@@ -98,4 +98,4 @@ npm 版本不可覆盖。确需改变已发布内容时增加版本号，重新�
 
 ## 维护入口
 
-用户文档放在 [docs 索引](README.md) 对应的主题文件；README 保持简短。内部设计与验证记录不作为最终用户操作步骤。变更行为时同时维护 API、CLI 帮助、中文 Skill 和相关操作文档。打包时保留根 LICENSE 与 CLI README。
+用户文档放在 [docs 索引](README.md) 对应的主题文件；README 保持简短。内部设计与验证记录不作为最终用户操作步骤。变更行为时同时维护 API、CLI 帮助、中文 Skill 和相关操作文档。项目许可证为 LGPL-3.0-only。打包时保留根 LICENSE、COPYING.GPL-3 与 CLI README。
