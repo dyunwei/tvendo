@@ -1,236 +1,86 @@
+<div align="center">
+
 # T vendo
 
-Go + Vue 3 + PostgreSQL + Redis；前端目录为 **`frontend`**，后端目录为 **`backend`**。
+**让 Agent 方便地发现和调用工具的自托管平台**<br>
+统一接入 HTTP 与 MCP 工具，按次计费，使用同一个余额与预算。
 
-## 当前功能
+[![CI](https://github.com/dyunwei/tvendo/actions/workflows/ci.yml/badge.svg)](https://github.com/dyunwei/tvendo/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/dyunwei/tvendo)](https://github.com/dyunwei/tvendo/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/dyunwei/tvendo)](https://hub.docker.com/r/dyunwei/tvendo)
+[![npm](https://img.shields.io/npm/v/@dyunwei/tvendo)](https://www.npmjs.com/package/@dyunwei/tvendo)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-- 公开页面：Home、Docs、邮箱密码注册 / 登录。主页没有 Tools、Rankings、Blog 导航。
-- 用户控制台：开始使用、工具目录与详情、API 密钥、预算、用量、钱包；附资源说明页。
-- 管理端：新增 / 修改 / 停用上游工具、配置鉴权密钥、接口与单次售价、查看用户与人工充值、管理员操作日志。
-- Agent 接入：中文 Skill、Go CLI、中文文本搜索、参数详情、余额与调用记录查询；Docker 镜像自带 npm 安装包和六种平台二进制。
-- API：发现工具、转发同步 HTTP / JSON 与远程 MCP 工具调用。单次预留余额、成功结算、失败退款，使用数据库行锁防止并发超扣。
-- 每日预算与单次预算，精度为整数微美元（1 USD = 1,000,000）；每日预算按 UTC 00:00 重置。
-- Redis 保存会话和请求限流；密码 bcrypt，API Key 仅保存 SHA-256 哈希，上游密钥使用 AES-256-GCM 加密。
-- 自动初始化数据库结构；首个管理员由首次启动的环境变量创建，后续启动不会覆盖管理员密码。
+![Tvendo 控制台](docs/screenshots/console.png)
 
-## 一次性部署
+</div>
 
-需要 Docker Engine 和 Compose 插件。
+## 为什么选择 Tvendo
 
-```sh
-cp .env.example .env
-```
+- **面向 Agent**：用中文查找工具，查看参数和价格，通过 CLI 或 API 调用。
+- **统一接入**：管理员配置 HTTP / JSON 或远程 MCP 上游，用户使用平台密钥。
+- **费用可控**：固定单次售价、统一余额、预算限制和调用记录。
 
-编辑 `.env`，至少替换以下配置：
+## 功能
 
-| 配置 | 说明 |
+| 功能 | 说明 |
 | --- | --- |
-| `POSTGRES_PASSWORD` | 数据库密码，建议使用随机十六进制字符串，避免连接串转义问题 |
-| `ADMIN_EMAIL` | 首次管理员邮箱 |
-| `ADMIN_PASSWORD` | 首次管理员密码，12–72 字节 |
-| `ADMIN_NAME` | 管理员显示名 |
-| `ENCRYPTION_KEY` | `openssl rand -hex 32` 生成的 64 位十六进制字符串，后续必须保持稳定 |
-| `PUBLIC_URL` | 浏览器访问的完整来源，例如 `https://tools.example.com`，不带路径 |
-| `COOKIE_SECURE` | 线上 HTTPS 设置为 `true`；本地 HTTP 为 `false` |
-| `PORT` | 宿主机端口，默认 8080 |
+| 工具目录 | 工具文本搜索、参数 Schema、输入示例与价格 |
+| Agent 接入 | 中文 Skill、Go CLI、REST API |
+| 上游管理 | HTTP 配置、MCP 工具同步、批量上下架与定价 |
+| 余额与预算 | 余额预留、成功结算、失败退款、单次与每日预算 |
+| 用户控制台 | 平台 API Key、用量、钱包与预算设置 |
+| 部署 | Docker Compose，PostgreSQL 与 Redis |
+
+## 快速开始
+
+需要 Docker Engine 和 Compose 插件。下载配置并编辑 `.env`：
 
 ```sh
-docker compose up -d --build
+mkdir tvendo && cd tvendo
+curl -fsSLO https://raw.githubusercontent.com/dyunwei/tvendo/v0.1.0/compose.yaml
+curl -fsSL https://raw.githubusercontent.com/dyunwei/tvendo/v0.1.0/.env.example -o .env
 ```
 
-打开 `http://localhost:8080`（或配置的域名）。用配置的管理员账户登录，侧栏进入「上游工具配置」。数据库和 Redis 不向宿主机暴露端口。生产环境在应用前配置 HTTPS 反向代理，转发到应用 8080 端口；`PUBLIC_URL` 必须与实际浏览器来源完全一致。
+设置数据库密码、管理员邮箱和密码、`ENCRYPTION_KEY`（用 `openssl rand -hex 32` 生成）与 `PUBLIC_URL`；将 `TVENDO_VERSION` 固定为 `0.1.0`，然后启动：
 
 ```sh
-docker compose logs -f app
-docker compose down
+docker compose pull
+docker compose up -d
 ```
 
-如果构建环境不能访问默认 Go 模块代理，可在 `.env` 增加 `GOPROXY=https://goproxy.cn,direct` 后重新构建。
+打开 http://localhost:8080，用配置的管理员账户登录。添加上游 → 核对参数和价格 → 开放工具 → 给用户充值 → 用户创建平台 API Key。
 
-`down` 保留卷内数据。备份 PostgreSQL 与 `ENCRYPTION_KEY`；密钥丢失后无法解密已有上游密钥。
+首次镜像与 npm 包将在 `v0.1.0` Release 工作流成功后可用。提前试用可从源码运行 `make source-up`。HTTPS、完整配置、升级及备份见 [部署说明](docs/deployment.md)。
 
-## 配置第一个工具
+## 接入 Agent
 
-1. 登录管理员，进入「上游工具配置」。内置 **默认停用** 的 TinyFish 示例。
-2. 根据你实际使用的上游官方文档，填写 Base URL、Header 名称、密钥前缀及密钥。例如：`Authorization` + `Bearer `（末尾空格），或 `X-API-Key` + 空前缀。
-3. 编辑「接口与定价」。每个接口配置唯一 ID、显示名称、HTTP 方法、路径、售价和参数示例。可点击「添加接口模板」生成一项再编辑。
-4. 核实地址、参数及定价后启用。用户目录仅显示已启用工具。
-5. 在「用户与充值」给注册用户入账，用户即可创建平台 API Key 并调用。
+把下面这句话发给 Agent：
 
-接口 JSON 示例：
-
-```json
-[
-  {
-    "id": "search",
-    "name": "Web Search",
-    "path": "/search",
-    "method": "POST",
-    "description": "根据关键词搜索网页",
-    "price_micros": 1000,
-    "parameters": { "query": "AI agent tools" }
-  }
-]
+```text
+请读取 https://<你的服务地址>/SKILL.md，帮我配置 Tvendo 工具接入。
 ```
 
-Base URL 与 path 直接拼接，例如 `https://api.example.com/v1` + `/search`。这不是某个提供商的有效 API 承诺；TinyFish 示例也需要按实际文档核对。项目不附带上游 API 凭证，不会自动激活示例工具。首页展示的生态品牌不代表已配置集成。
-
-资源 JSON 是**说明信息**，例如 `[{"name":"Cloud browser","description":"浏览器会话服务","price":"$0.002 / 分钟"}]`；本版本不提供资源的创建、租赁与生命周期管理。
-
-## MCP 上游：一键同步与批量管理
-
-后端需要 Go 1.25+，使用官方 MCP Go SDK。支持 Streamable HTTP，以及旧版 HTTP+SSE。这里实现的是**上游 MCP 客户端**；用户仍通过本平台 `/v1/tools`、`/v1/run` 或 Skill 调用。
-
-已有部署重新编译并重启后，启动事务会自动增加所需字段，不需要清库。
-
-1. 在「上游工具配置」新增或编辑提供商，接入类型选择 `MCP · Streamable HTTP`；旧版服务选择 `MCP · 旧版 SSE`。
-2. 填写**完整 MCP 地址**、鉴权 Header、密钥前缀与 Key，并设置默认单次售价（USD）。Key 单独填写，不放进 URL。价格为管理员设定，不会自动读取上游成本。
-3. 保存配置，进入「工具与定价」，点击「测试连接并同步」。这会实际连接上游，完成初始化并读取全部分页的工具清单；不会执行收费工具。
-4. 新工具默认未启用。搜索 / 筛选后可选择全部匹配项，批量启用、停用、设置覆盖售价或恢复默认售价；每行也支持单独操作。批量改价使用表格上方的售价输入值；单独改价使用该行的售价输入框。
-5. 只有提供商已开放，且子工具已启用、未被上游删除时，用户才可查看和调用。HTTP 上游保留原来的手动接口配置方式。
-
-对已有 TinyFish 示例，请先将接入类型从 HTTP 改为实际 MCP 类型，填入地址和 Key 后保存。首次转换会清除两个 HTTP 示例接口，随后从远程同步真实工具。
-
-定价与同步规则：
-
-- 未设覆盖价的 MCP 工具在展示和调用时跟随提供商默认价；修改默认价立即影响这些工具。覆盖价为 0 时仍表示明确设置的免费工具，不会回退到默认价。
-- 再次同步更新名称、介绍、输入 Schema，保留工具 ID、原有上下架状态和价格覆盖。新增工具待审核；上游删除的工具保留记录并强制停用；重新出现也不会自动启用。
-- 参数 Schema 变化会标记「参数待复核」，原有上下架状态保持不变；确认并启用可清除标记。
-- 连接失败、鉴权失败或分页失败不修改原清单。并发保存 / 同步会使用版本检查，遇到冲突请刷新后再操作。
-- 手动同步，最多 5000 个工具 / 100 个上游分页；管理界面每页 30 条，可跨页选择全部筛选结果。当前不做定时同步，也不导入 MCP resources / prompts。
-- 实际调用使用 `tools/call`，MCP `isError` 与协议失败按失败退款。平台 API 返回完整 MCP 结果对象，不把 MCP 传输层事件直接流式输出给用户。
-- 使用 API Key / 自定义 Header 鉴权；本版不支持交互式 OAuth 登录、需要 sampling / elicitation 的服务端反向交互或异步长任务。
-
-## 本地开发
-
-启动可连接的 PostgreSQL / Redis，并导出环境变量（Go 进程不会自动加载 `.env`）：
+也可直接安装 CLI，在本机配置 `TVENDO_SERVER` 和 `TVENDO_API_KEY` 后使用：
 
 ```sh
-set -a
-. ./.env
-set +a
-```
-
-根目录的 `.env.example` 里 `DATABASE_URL` / `REDIS_URL` 用于宿主机开发，需与数据库实际地址和密码匹配；Compose 内的应用连接串由 Compose 自动构造。
-
-安装和编译：
-
-```sh
-cd frontend
-npm ci
-npm run build
-cd ../backend
-go mod download
-go build -buildvcs=false -o bin/server ./cmd/server
-./bin/server
-```
-
-Go 入口在 `backend/cmd/server/`，编译产物在 `backend/bin/`。从 `backend` 目录运行 `./bin/server`，不要切换到 `bin` 目录执行。也可以在仓库根目录用 `make backend-build` 只编译后端。
-
-Go 默认提供 `../frontend/dist` 静态文件，可用 `FRONTEND_DIST` 覆盖。
-
-需要前端热更新时，后端继续运行，设置后端 `PUBLIC_URL=http://localhost:5173`，另一终端运行：
-
-```sh
-cd frontend
-npm run dev
-```
-
-访问 `http://localhost:5173`，Vite 将 API / Skill 请求转发到 `http://localhost:8080`。开发阶段 `COOKIE_SECURE=false`。
-
-## API
-
-```sh
-export TVENDO_API_KEY='tv_live_...'
-curl http://localhost:8080/v1/tools \
-  -H "Authorization: Bearer $TVENDO_API_KEY"
-
-curl http://localhost:8080/v1/run \
-  -H "Authorization: Bearer $TVENDO_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"tool":"tinyfish","endpoint":"search","parameters":{"query":"AI agents"}}'
-```
-
-成功返回 `{ "id": 42, "cost_micros": 1000, "data": ... }`。错误返回 `{ "error": "..." }`。响应 `503` 时先查询用量，避免无意重复调用。
-
-- 同步 HTTP / JSON 和远程 MCP 工具；60 秒超时，8 MB 响应上限，1 MB 平台请求体上限。
-- GET 上游参数编码为查询字符串；POST / PUT / PATCH / DELETE 上游参数作为 JSON 请求体。平台不转发用户提供的 Authorization 到上游。
-- 不跟随上游重定向；默认只允许公网 HTTPS 上游，并在每次建立连接时验证解析地址。
-- 本地集成测试可设置 `ALLOW_PRIVATE_UPSTREAM=true` 允许 HTTP / 私网，请勿在线上启用。
-- 调用成功按配置的固定单次价格结算。上游失败、超时或超出响应限制退回预留款；崩溃遗留的预留款在 5 分钟后由后台恢复退款。上游可能已执行的操作无法撤销，平台不自动重试。
-- 每个密钥可以读取该账户可用工具并发起调用，不能访问管理端；没有细粒度权限配置。
-
-## 验证
-
-GitHub Actions 配置位于 `.github/workflows/ci.yml`，推送到 `main`、提交 Pull Request 或手动触发时运行：
-
-- Node.js 24 前端类型检查与生产构建。
-- Go 1.26 静态分析及 race 测试；自动启动独立的 PostgreSQL 17 / Redis 7，执行单元与集成测试。
-- Docker 多阶段镜像构建验证。
-
-CI 使用临时测试凭据，不需要配置仓库 Secrets；数据库与 Redis 随任务结束销毁。
-
-```sh
-cd frontend && npm run build
-cd ../backend && go test -buildvcs=false ./...
-```
-
-并发扣费等集成测试使用 **专用空数据库**（测试拒绝使用已有 users 表的数据库）和专用 Redis：
-
-```sh
-TEST_DATABASE_URL='postgres://.../tvendo_test?sslmode=disable' \
-TEST_REDIS_URL='redis://localhost:6379/15' \
-go test -buildvcs=false -race -v ./...
-```
-
-集成测试包含注册登录、管理员隔离、CSRF、上游密钥加密、充值、预算拦截、并发余额预留、失败退款、账目一致性、密钥撤销、崩溃预留恢复及管理员初始化幂等性。
-
-## 第一版范围
-
-人工充值；没有在线支付、邮件验证 / 找回密码、团队空间、面向用户的 MCP 服务端、异步任务、流式响应、动态路径参数或用量驱动的变动费率。账户密码问题暂由部署方处理。上游接口配置和费率由管理员维护。用量与账目各返回最近 200 条，用户管理最多显示最近 1000 位用户。
-
-品牌使用 T vendo，文案与功能根据本项目范围调整。
-
-## Agent CLI
-
-CLI 使用 Go 编写；使用时无需 Go 或本机编译。支持 Linux、macOS、Windows 的 amd64 / arm64。npm 包包含六种平台程序，安装时无脚本钩子、运行时不额外下载。公共 npm 包尚未发布；部署可以直接提供自己的安装包。
-
-Docker 镜像自带 CLI 产物。Agent 先读取 `https://<服务地址>/SKILL.md`，或查询 `/v1/info`：`data.cli_available=true` 时，`npm_url` 是实际安装包地址，`install_url` 是 Unix 安装脚本地址。例如从响应中取得 URL 后：
-
-```sh
-npm install -g '<npm_url>'
-# 或临时运行，无需全局安装
-npx --yes --package '<npm_url>' tvendo --help
-```
-
-没有 Node.js 时，下载 `install_url` 指向的脚本并运行；默认安装到 `~/.local/bin`，支持 `--dir <目录>` 与 `--version 0.1.0`。脚本校验 SHA-256，不需要 sudo。Windows 可使用 npm，或从 `/cli/manifest.json` 获取对应 exe 并对照 `/cli/SHA256SUMS` 校验。HTTPS 证书须被客户端信任，不要使用跳过校验的参数。
-
-本机配置：
-
-```sh
-export TVENDO_SERVER='https://<服务地址>'
-# 在本机配置 TVENDO_API_KEY，避免把密钥贴进对话或写入 shell 历史。
+npm install -g @dyunwei/tvendo
 tvendo doctor --json
 tvendo tools search '网页搜索' --json
-tvendo tools show '<tool_ref>' --json
-tvendo run '<tool_ref>' --input-file input.json --max-cost-micros 1000 --output result.json --json
-tvendo runs list --json
-tvendo wallet balance --json
-tvendo budget show --json
 ```
 
-`setup --server <url> --key-stdin` 从标准输入接收并保存密钥，配置文件权限为 0600（Windows 权限还取决于用户目录 ACL）；也可只使用环境变量。`TVENDO_CONFIG` 指定配置文件。切换已配置的服务地址会清除旧服务密钥，并拒绝将已有环境变量密钥自动用于新服务。
+无需全局安装时用 `npx --yes @dyunwei/tvendo --help`。完整配置、二进制安装及调用流程见 [Agent 接入](docs/agent-access.md)。
 
-`--json` 在 stdout 输出单个 JSON 对象，提示写 stderr。金额单位为整数微美元。`run` 同步执行且不会自动重试；输出请求标识后，可用 `runs list --request-id <id>` 核对。`--output` 不覆盖现有文件。调用记录只用于核账，服务器不保存完整结果正文。
+## 项目状态
 
-新增 API：`/v1/catalog`、`/v1/catalog/{tool_ref}`、`/v1/runs`、`/v1/runs/{id}`、`/v1/balance`、`/v1/budgets`；均使用平台 API Key。旧 `/v1/tools` 和 `/v1/run` 调用格式继续有效。新调用可传 `tool_ref` 与 `max_cost_micros`，两种工具标识形式不能混用。请求标识只用于关联查询，不表示幂等。
+首个公开版本为 **0.1.0**。当前采用人工充值，支持同步 HTTP / JSON 和远程 MCP 工具调用。工具与供应商凭据由部署管理员配置，不附带现成的付费服务。已知限制与验证范围见 [兼容性](docs/compatibility.md)。
 
-源码构建与验证：
+## 文档与贡献
 
-```sh
-make cli-build    # 当前平台，生成 backend/bin/tvendo
-make cli-release  # 六个平台 + npm tgz + 校验清单，生成 distribution/dist
-node scripts/smoke-cli.mjs
-```
+[文档索引](docs/README.md) · [部署](docs/deployment.md) · [Agent 接入](docs/agent-access.md) · [上游管理](docs/upstreams.md) · [API](docs/api.md) · [开发](docs/development.md) · [维护与发布](docs/maintaining.md) · [更新日志](CHANGELOG.md)
 
-本机后端默认读取 `../distribution/dist`（从 backend 目录启动时）；可用 `CLI_DIST` 指定产物目录。没有产物时 `/v1/info` 不会宣称可安装 CLI。CI 的 `CLI packages` 工作流构建并上传安装产物，不自动发布 npm 或 GitHub Release。若后续发布公共 npm 包，须先确认包名所有权和发布凭据；当前包名 `tvendo-cli` 仅用于自托管 tgz。升级版本时同步修改 CLI 默认版本、Makefile、Dockerfile 和 CLI 工作流中的版本号。
+欢迎通过 [Issues](https://github.com/dyunwei/tvendo/issues) 和 Pull Requests 参与改进。
+
+## 许可证
+
+采用 [GNU AGPL v3](LICENSE)。

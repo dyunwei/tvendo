@@ -4,8 +4,9 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-const [outputArg, version = '0.1.0'] = process.argv.slice(2);
-if (!outputArg || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('用法: node distribution/package.mjs <输出目录> <版本>');
+import { readVersion, versionPattern, packageName as npmName, tarballName } from './version.mjs';
+const [outputArg, version = readVersion()] = process.argv.slice(2);
+if (!outputArg || !versionPattern.test(version) || version !== readVersion()) throw new Error('用法: node distribution/package.mjs <输出目录> <版本>');
 const output = resolve(outputArg);
 const pkg = mkdtempSync(join(tmpdir(), 'tvendo-package-'));
 mkdirSync(join(pkg, 'bin'), { recursive: true });
@@ -21,15 +22,24 @@ for (const os of ['linux', 'darwin', 'windows']) {
 }
 copyFileSync(new URL('./launcher.cjs', import.meta.url), join(pkg, 'launcher.cjs'));
 chmodSync(join(pkg, 'launcher.cjs'), 0o755);
+copyFileSync(new URL('./README.md', import.meta.url), join(pkg, 'README.md'));
+copyFileSync(new URL('../LICENSE', import.meta.url), join(pkg, 'LICENSE'));
 writeFileSync(join(pkg, 'package.json'), JSON.stringify({
-  name: 'tvendo-cli', version, description: 'Tvendo Agent 工具客户端',
-  bin: { tvendo: 'launcher.cjs' }, files: ['launcher.cjs', 'bin'],
+  name: npmName, version, description: 'Tvendo Agent 工具客户端',
+  bin: { tvendo: 'launcher.cjs' }, files: ['launcher.cjs', 'bin', 'README.md', 'LICENSE'],
   engines: { node: '>=18' }, os: ['linux', 'darwin', 'win32'], cpu: ['x64', 'arm64'],
+  license: 'SEE LICENSE IN LICENSE',
+  homepage: 'https://github.com/dyunwei/tvendo',
+  publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
   repository: { type: 'git', url: 'https://github.com/dyunwei/tvendo.git' }
 }, null, 2));
 execFileSync('npm', ['pack', '--ignore-scripts', '--cache', join(pkg, '.cache'), '--pack-destination', output], { cwd: pkg, stdio: 'inherit' });
 rmSync(pkg, { recursive: true, force: true });
-const packageName = `tvendo-cli-${version}.tgz`;
+const packageName = tarballName(version);
 checksums.push(`${createHash('sha256').update(readFileSync(join(output, packageName))).digest('hex')}  ${packageName}`);
+for (const [source, name] of [[new URL('../LICENSE', import.meta.url), 'LICENSE'], [new URL('./README.md', import.meta.url), 'CLI-README.md']]) {
+  copyFileSync(source, join(output, name));
+  checksums.push(`${createHash('sha256').update(readFileSync(source)).digest('hex')}  ${name}`);
+}
 writeFileSync(join(output, 'SHA256SUMS'), checksums.join('\n') + '\n');
-writeFileSync(join(output, 'manifest.json'), JSON.stringify({ version, package: packageName, platforms: checksums.slice(0, 6).map(line => line.split('  ')[1]) }, null, 2) + '\n');
+writeFileSync(join(output, 'manifest.json'), JSON.stringify({ version, npm_package: npmName, package: packageName, platforms: checksums.slice(0, 6).map(line => line.split('  ')[1]) }, null, 2) + '\n');

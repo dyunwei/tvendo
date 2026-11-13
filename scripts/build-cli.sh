@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
-version=${1:-0.1.0}
+version=$(node scripts/release-metadata.mjs --version)
+if [ "$#" -gt 0 ] && [ "$1" != "$version" ]; then
+ echo "指定版本必须与 VERSION ($version) 一致" >&2; exit 2
+fi
 output=${2:-distribution/dist}
 case "$output" in /*) ;; *) output="$(pwd)/$output" ;; esac
 mkdir -p "$output"
@@ -11,3 +14,5 @@ for os in linux darwin windows; do
  done
 done
 node distribution/package.mjs "$output" "$version"
+
+node scripts/verify-cli.mjs "$output"

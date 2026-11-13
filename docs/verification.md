@@ -33,8 +33,21 @@
 - CLI 验证：单对象 JSON 输出、参数与退出码、密钥脱敏及配置权限、切换服务地址不转发旧密钥、拒绝跟随重定向、上游失败不自动重试、结果文件不覆盖、JSON 整数精度保留。
 - Linux / macOS / Windows 的 amd64 / arm64 交叉编译通过；本机实际运行 Linux amd64，其他平台未执行运行时验证。
 - 实际 npm tarball 的 npx 启动、中文搜索、Unix 安装脚本、SHA-256 清单损坏时拒绝安装、调用结果保存验证通过。测试入口：`node scripts/smoke-cli.mjs <产物目录>`。
-- 中文 skill 元数据校验、前端 TypeScript / 生产构建，以及包含六平台二进制和 npm 包的 Docker 镜像构建通过。当前构建网络使用 README 已支持的 `--build-arg GOPROXY=https://goproxy.cn,direct`。
+- 中文 skill 元数据校验、前端 TypeScript / 生产构建，以及包含六平台二进制和 npm 包的 Docker 镜像构建通过。当前构建网络使用 部署文档支持的 `--build-arg GOPROXY=https://goproxy.cn,direct`。
 
 - 实际启动测试镜像后，通过它的自托管 npm URL 完成 npx 下载、创建临时账户并验证 doctor / 搜索 / 余额 / 记录查询；镜像生成的安装脚本成功下载并安装对应二进制。临时应用、数据库与 Redis 容器均已清理。
 
 上述测试使用受控上游和临时数据库，不代表真实供应商调用或线上部署已经完成；公共 npm 包尚未发布。
+
+## 首版发布与文档重组验证
+
+- 根 VERSION 为 0.1.0，CLI、npm 包、Docker 构建及 Release 标签检查读取同一版本来源；稳定版 / beta 标签与 GitHub Pre-release 标记不符时拒绝发布。
+- `@dyunwei/tvendo` 的正式版与隔离目录中的 `0.2.0-beta.1` 包均完成六平台编译、清单验证及安装 smoke test。npm tarball 包含独立中文 README 和 LICENSE；重复构建当前正式版产物的校验值一致。
+- npm 离线 dry-run 通过，未上传包；重复发布逻辑用模拟 registry 响应验证：404 才视为新版本，同内容可跳过，不同内容或 registry 失败必须终止。
+- actionlint 和 YAML 检查通过；测试了发布及源码 Compose 配置，README / docs 的本地链接可解析。README 截图来自本次隔离测试环境。
+- Go vet、race 单元及隔离 PostgreSQL / Redis 全量集成测试、前端 TypeScript / 生产构建通过。
+- Docker 源码构建和复用预构建 CLI 产物的发布构建均通过；发布镜像实际提供 scoped npm 下载地址、安装脚本与可鉴权查询的 CLI API。ARM64 服务端交叉编译产物已确认为 aarch64 ELF；未在 ARM64 主机运行完整应用。
+
+未执行 GitHub 上的真实 Release、Docker Hub 推送或 npm 正式发布，也未验证真实账号的发布权限。首次发布前按 [维护指南](maintaining.md) 配置 Docker Secrets 和具有发布权限的 NPM_TOKEN；首次发布成功后可改用 Trusted Publisher。
+
+- npm 鉴权选择测试通过：配置 Token 时只用 Token，无 Token 时保留 OIDC，离线预检不使用发布凭证。此检查不读取或验证 GitHub Secret 的实际值。

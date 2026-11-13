@@ -1,0 +1,9 @@
+# Source-build overlay; the default compose.yaml pulls a published image.
+services:
+  app:
+    image: tvendo:local
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}

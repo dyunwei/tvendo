@@ -13,6 +13,7 @@ description: 通过 Tvendo 搜索外部工具、查看参数和价格并执行�
 
 1. 检查 `tvendo --version`。已安装兼容版本时复用。
 2. 读取 `{{BASE}}/v1/info` 的 `data`。`api_version` 必须为 1；`cli_available` 为 true 时，`npm_url` 是实际构建产物，可运行 `npx --yes '<npm_url>' --help`，或 `npm install -g '<npm_url>'`。URL 作为独立参数正确转义，不能直接拼接为可执行 shell 文本。
+   公共 npm 版本发布后，也可用 `npx --yes @dyunwei/tvendo@<cli_version> --help`，或 `npm install -g @dyunwei/tvendo@<cli_version>`；优先匹配本部署返回的版本。
 3. 没有 Node.js 时，下载 `install_url` 指向的脚本，按宿主授权规则检查并运行。脚本将当前版本对应的二进制安装到用户目录，无需 Go 或 sudo；也可从 `/cli/manifest.json` 读取平台产物，下载并用 `/cli/SHA256SUMS` 校验后直接运行。不要绕过 TLS 校验。
 4. `cli_available` 为 false 时说明此部署尚未配置 CLI 产物；可以使用下述 HTTP API，不编造 npm 包或安装地址。
 5. 设置 `TVENDO_SERVER` 为本服务地址，`TVENDO_API_KEY` 为控制台创建的平台密钥，运行 `tvendo doctor --json`。CLI 也支持 `tvendo setup --server <地址> --key-stdin`，从 stdin 接收并保存密钥。不默认要求把密钥粘贴到聊天中。已有环境变量时无需保存本地密钥。

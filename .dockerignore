@@ -7,4 +7,3 @@ backend/tvendo
 *.log
 
 backend/bin
-distribution/dist

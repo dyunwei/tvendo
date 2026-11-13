@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -35,5 +38,32 @@ func TestSkillAndMissingRelease(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/cli/install.sh", nil))
 	if w.Code != 503 {
 		t.Fatal("advertised missing installer")
+	}
+}
+
+func TestCLIReleaseMetadata(t *testing.T) {
+	for _, version := range []string{"0.1.0", "0.2.0-beta.1"} {
+		t.Run(version, func(t *testing.T) {
+			directory := t.TempDir()
+			t.Setenv("CLI_DIST", directory)
+			name := "dyunwei-tvendo-" + version + ".tgz"
+			if err := os.WriteFile(filepath.Join(directory, name), []byte("test-package"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(map[string]string{"version": version, "package": name})
+			if err := os.WriteFile(filepath.Join(directory, "manifest.json"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			a := &App{publicURL: "https://tools.example.com"}
+			info := a.cliInfo()
+			if info["cli_available"] != true || info["npm_package"] != "@dyunwei/tvendo" || info["cli_version"] != version {
+				t.Fatal(info)
+			}
+			w := httptest.NewRecorder()
+			a.routes().ServeHTTP(w, httptest.NewRequest("GET", "/cli/"+name, nil))
+			if w.Code != 200 || w.Body.String() != "test-package" {
+				t.Fatalf("release asset unavailable: %d", w.Code)
+			}
+		})
 	}
 }

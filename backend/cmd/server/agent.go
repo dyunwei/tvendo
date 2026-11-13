@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+var buildVersion = "dev"
+
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,80}$`)
 
 func toolRef(id int64, endpoint string) string {
@@ -215,23 +217,24 @@ func (a *App) agentBudget(w http.ResponseWriter, r *http.Request, u User) {
 // Serve only generated release filenames. Never expose arbitrary local files.
 func (a *App) cliAsset(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if !regexp.MustCompile(`^(tvendo-(linux|darwin|windows)-(amd64|arm64)(\.exe)?|tvendo-cli-[0-9]+\.[0-9]+\.[0-9]+\.tgz|SHA256SUMS|manifest\.json)$`).MatchString(name) {
+	if !regexp.MustCompile(`^(tvendo-(linux|darwin|windows)-(amd64|arm64)(\.exe)?|(tvendo-cli|dyunwei-tvendo)-[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?\.tgz|SHA256SUMS|manifest\.json)$`).MatchString(name) {
 		http.NotFound(w, r)
 		return
 	}
 	http.ServeFile(w, r, filepath.Join(env("CLI_DIST", "../distribution/dist"), name))
 }
 func (a *App) cliInfo() map[string]any {
-	info := map[string]any{"brand": "T vendo", "api_version": 1, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
+	info := map[string]any{"brand": "T vendo", "api_version": 1, "version": buildVersion, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
 	raw, err := os.ReadFile(filepath.Join(env("CLI_DIST", "../distribution/dist"), "manifest.json"))
 	var manifest struct {
 		Version string `json:"version"`
 		Package string `json:"package"`
 	}
-	if err == nil && json.Unmarshal(raw, &manifest) == nil && regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`).MatchString(manifest.Version) && manifest.Package == "tvendo-cli-"+manifest.Version+".tgz" {
+	if err == nil && json.Unmarshal(raw, &manifest) == nil && regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`).MatchString(manifest.Version) && (manifest.Package == "dyunwei-tvendo-"+manifest.Version+".tgz" || manifest.Package == "tvendo-cli-"+manifest.Version+".tgz") {
 		if _, err := os.Stat(filepath.Join(env("CLI_DIST", "../distribution/dist"), manifest.Package)); err == nil {
 			info["cli_available"] = true
 			info["cli_version"] = manifest.Version
+			info["npm_package"] = "@dyunwei/tvendo"
 			info["npm_url"] = a.publicURL + "/cli/" + manifest.Package
 			info["install_url"] = a.publicURL + "/cli/install.sh"
 		}
