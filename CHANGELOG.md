@@ -2,6 +2,12 @@
 
 公开版本从 0.1.0 开始；发布状态以 [GitHub Releases](https://github.com/dyunwei/tvendo/releases) 为准。
 
+## 0.1.1
+
+- Release 新增 compose.yaml 与 env.example 部署附件，配置模板自动固定本次发布的镜像版本。
+- README 与部署文档使用最新正式版附件下载地址，后续发布无需手工更新下载链接。
+- Compose 默认通过镜像源拉取应用、PostgreSQL 和 Redis。
+
 ## 0.1.0
 
 首个公开版本，采用 GNU LGPL v3（LGPL-3.0-only）。
