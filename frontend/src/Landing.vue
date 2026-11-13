@@ -16,7 +16,9 @@ import {
 } from "lucide-vue-next";
 const copied = ref(false),
   open = ref(-1);
-const command = computed(() => `set up ${window.location.origin}/SKILL.md`);
+const command = computed(
+  () => `请读取 ${window.location.origin}/SKILL.md，帮我配置 Tvendo 工具接入。`,
+);
 async function copy() {
   try {
     await navigator.clipboard.writeText(command.value);
@@ -116,8 +118,7 @@ const faqs = [
             p[0]
           }}</span>
           <div>
-            <strong>{{ p[1] }}</strong
-            ><small>{{ p[2] }}</small>
+            <strong>{{ p[1] }}</strong><small>{{ p[2] }}</small>
           </div>
           <span
             v-if="i === 2"

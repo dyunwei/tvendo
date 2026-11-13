@@ -7,6 +7,7 @@ Go + Vue 3 + PostgreSQL + Redis；前端目录为 **`frontend`**，后端目录�
 - 公开页面：Home、Docs、邮箱密码注册 / 登录。主页没有 Tools、Rankings、Blog 导航。
 - 用户控制台：开始使用、工具目录与详情、API 密钥、预算、用量、钱包；附资源说明页。
 - 管理端：新增 / 修改 / 停用上游工具、配置鉴权密钥、接口与单次售价、查看用户与人工充值、管理员操作日志。
+- Agent 接入：中文 Skill、Go CLI、中文文本搜索、参数详情、余额与调用记录查询；Docker 镜像自带 npm 安装包和六种平台二进制。
 - API：发现工具、转发同步 HTTP / JSON 与远程 MCP 工具调用。单次预留余额、成功结算、失败退款，使用数据库行锁防止并发超扣。
 - 每日预算与单次预算，精度为整数微美元（1 USD = 1,000,000）；每日预算按 UTC 00:00 重置。
 - Redis 保存会话和请求限流；密码 bcrypt，API Key 仅保存 SHA-256 哈希，上游密钥使用 AES-256-GCM 加密。
@@ -186,6 +187,50 @@ go test -buildvcs=false -race -v ./...
 
 ## 第一版范围
 
-人工充值；没有在线支付、邮件验证 / 找回密码、团队空间、面向用户的 MCP 服务端、独立 CLI、异步任务、流式响应、动态路径参数或用量驱动的变动费率。账户密码问题暂由部署方处理。上游接口配置和费率由管理员维护。用量与账目各返回最近 200 条，用户管理最多显示最近 1000 位用户。
+人工充值；没有在线支付、邮件验证 / 找回密码、团队空间、面向用户的 MCP 服务端、异步任务、流式响应、动态路径参数或用量驱动的变动费率。账户密码问题暂由部署方处理。上游接口配置和费率由管理员维护。用量与账目各返回最近 200 条，用户管理最多显示最近 1000 位用户。
 
 品牌使用 T vendo，文案与功能根据本项目范围调整。
+
+## Agent CLI
+
+CLI 使用 Go 编写；使用时无需 Go 或本机编译。支持 Linux、macOS、Windows 的 amd64 / arm64。npm 包包含六种平台程序，安装时无脚本钩子、运行时不额外下载。公共 npm 包尚未发布；部署可以直接提供自己的安装包。
+
+Docker 镜像自带 CLI 产物。Agent 先读取 `https://<服务地址>/SKILL.md`，或查询 `/v1/info`：`data.cli_available=true` 时，`npm_url` 是实际安装包地址，`install_url` 是 Unix 安装脚本地址。例如从响应中取得 URL 后：
+
+```sh
+npm install -g '<npm_url>'
+# 或临时运行，无需全局安装
+npx --yes --package '<npm_url>' tvendo --help
+```
+
+没有 Node.js 时，下载 `install_url` 指向的脚本并运行；默认安装到 `~/.local/bin`，支持 `--dir <目录>` 与 `--version 0.1.0`。脚本校验 SHA-256，不需要 sudo。Windows 可使用 npm，或从 `/cli/manifest.json` 获取对应 exe 并对照 `/cli/SHA256SUMS` 校验。HTTPS 证书须被客户端信任，不要使用跳过校验的参数。
+
+本机配置：
+
+```sh
+export TVENDO_SERVER='https://<服务地址>'
+# 在本机配置 TVENDO_API_KEY，避免把密钥贴进对话或写入 shell 历史。
+tvendo doctor --json
+tvendo tools search '网页搜索' --json
+tvendo tools show '<tool_ref>' --json
+tvendo run '<tool_ref>' --input-file input.json --max-cost-micros 1000 --output result.json --json
+tvendo runs list --json
+tvendo wallet balance --json
+tvendo budget show --json
+```
+
+`setup --server <url> --key-stdin` 从标准输入接收并保存密钥，配置文件权限为 0600（Windows 权限还取决于用户目录 ACL）；也可只使用环境变量。`TVENDO_CONFIG` 指定配置文件。切换已配置的服务地址会清除旧服务密钥，并拒绝将已有环境变量密钥自动用于新服务。
+
+`--json` 在 stdout 输出单个 JSON 对象，提示写 stderr。金额单位为整数微美元。`run` 同步执行且不会自动重试；输出请求标识后，可用 `runs list --request-id <id>` 核对。`--output` 不覆盖现有文件。调用记录只用于核账，服务器不保存完整结果正文。
+
+新增 API：`/v1/catalog`、`/v1/catalog/{tool_ref}`、`/v1/runs`、`/v1/runs/{id}`、`/v1/balance`、`/v1/budgets`；均使用平台 API Key。旧 `/v1/tools` 和 `/v1/run` 调用格式继续有效。新调用可传 `tool_ref` 与 `max_cost_micros`，两种工具标识形式不能混用。请求标识只用于关联查询，不表示幂等。
+
+源码构建与验证：
+
+```sh
+make cli-build    # 当前平台，生成 backend/bin/tvendo
+make cli-release  # 六个平台 + npm tgz + 校验清单，生成 distribution/dist
+node scripts/smoke-cli.mjs
+```
+
+本机后端默认读取 `../distribution/dist`（从 backend 目录启动时）；可用 `CLI_DIST` 指定产物目录。没有产物时 `/v1/info` 不会宣称可安装 CLI。CI 的 `CLI packages` 工作流构建并上传安装产物，不自动发布 npm 或 GitHub Release。若后续发布公共 npm 包，须先确认包名所有权和发布凭据；当前包名 `tvendo-cli` 仅用于自托管 tgz。升级版本时同步修改 CLI 默认版本、Makefile、Dockerfile 和 CLI 工作流中的版本号。

@@ -1,4 +1,4 @@
-.PHONY: build backend-build test dev deps-up deps-down up down
+.PHONY: cli-build cli-release build backend-build test dev deps-up deps-down up down
 build:
 	cd frontend && npm ci && npm run build
 	$(MAKE) backend-build
@@ -16,3 +16,8 @@ up:
 	docker compose up -d --build
 down:
 	docker compose down
+
+cli-build:
+	cd backend && go build -buildvcs=false -o bin/tvendo ./cmd/tvendo
+cli-release:
+	sh scripts/build-cli.sh 0.1.0

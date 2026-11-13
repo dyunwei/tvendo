@@ -13,3 +13,5 @@ backend/tvendo
 .DS_Store
 
 backend/bin/
+
+distribution/dist/

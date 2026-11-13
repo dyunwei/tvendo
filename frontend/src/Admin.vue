@@ -132,6 +132,11 @@ function addEndpoint() {
       description: "接口能力说明",
       price_micros: 1000,
       parameters: { query: "example" },
+      input_schema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
     });
     endpointText.value = JSON.stringify(eps, null, 2);
   } catch {
@@ -673,8 +678,9 @@ function downloadExample() {
                   spellcheck="false"
                   aria-label="接口 JSON 配置"
                 /><small
-                  >字段：id（唯一标识）、name、path、method、description、price_micros、parameters（参数示例）。支持
-                  GET / POST / PUT / PATCH /
+                  >字段：id（唯一标识）、name、path、method、description、price_micros、input_schema（JSON
+                  Schema）、parameters（参数示例，不能替代 Schema）。支持 GET /
+                  POST / PUT / PATCH /
                   DELETE。此版本不支持参数映射、动态路径或流式返回。</small
                 >
               </template>

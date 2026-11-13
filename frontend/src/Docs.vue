@@ -92,18 +92,18 @@ const items = [
         <p class="doc-lead">
           把这条指令发给能读取网页并发送 HTTP 请求的 Agent。
         </p>
-        <pre>set up {{ base }}/SKILL.md</pre>
+        <pre>请读取 {{ base }}/SKILL.md，帮我配置 Tvendo 工具接入。</pre>
         <h2>接入流程</h2>
         <p>
-          Skill 描述了发现接口与执行调用的步骤。你的 Agent
-          读取文档后，仍需要你提供平台 API Key，并在付费调用前确认费用。
+          Skill 描述了发现接口与执行调用的步骤。你的 Agent 读取文档后，会检查
+          CLI 和接入配置。请在本机配置平台 API Key，并授权任务的费用范围。
         </p>
         <a href="/SKILL.md" target="_blank" rel="noopener" class="btn outline"
           >查看 SKILL.md <ArrowUpRight :size="15"
         /></a>
         <div class="alert">
-          当前版本支持 Skill、REST API 及上游 MCP 工具。面向用户的 MCP
-          服务端和独立 CLI 暂未提供。
+          支持中文 Skill、REST API、Go CLI 及上游 MCP 工具。CLI 安装入口见
+          /v1/info；Docker 镜像自带 npm 安装包与六种平台二进制，无需本机编译。
         </div></template
       >
       <template v-else-if="tab === 'api'"

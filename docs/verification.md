@@ -25,3 +25,16 @@
 - Go 编译 / vet、Vue TypeScript / 生产构建，以及包含 MCP SDK 的 Docker 镜像构建。
 
 为隔离测试数据，未连接真实 TinyFish，也未改动用户现有数据库。
+
+## Agent CLI 与安装分发验证
+
+- Go 静态分析、race 单元与隔离 PostgreSQL / Redis 集成测试通过；保留原有 12 并发请求的余额与账目一致性验证。
+- 新 API 验证：工具搜索与详情、费用上限预检不产生调用记录、tool_ref 执行、退款状态、请求标识关联、余额与预算查询、其他账户不可读取调用记录。
+- CLI 验证：单对象 JSON 输出、参数与退出码、密钥脱敏及配置权限、切换服务地址不转发旧密钥、拒绝跟随重定向、上游失败不自动重试、结果文件不覆盖、JSON 整数精度保留。
+- Linux / macOS / Windows 的 amd64 / arm64 交叉编译通过；本机实际运行 Linux amd64，其他平台未执行运行时验证。
+- 实际 npm tarball 的 npx 启动、中文搜索、Unix 安装脚本、SHA-256 清单损坏时拒绝安装、调用结果保存验证通过。测试入口：`node scripts/smoke-cli.mjs <产物目录>`。
+- 中文 skill 元数据校验、前端 TypeScript / 生产构建，以及包含六平台二进制和 npm 包的 Docker 镜像构建通过。当前构建网络使用 README 已支持的 `--build-arg GOPROXY=https://goproxy.cn,direct`。
+
+- 实际启动测试镜像后，通过它的自托管 npm URL 完成 npx 下载、创建临时账户并验证 doctor / 搜索 / 余额 / 记录查询；镜像生成的安装脚本成功下载并安装对应二进制。临时应用、数据库与 Redis 容器均已清理。
+
+上述测试使用受控上游和临时数据库，不代表真实供应商调用或线上部署已经完成；公共 npm 包尚未发布。

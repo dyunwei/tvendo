@@ -155,6 +155,7 @@ func TestIntegrationBilling(t *testing.T) {
 	tool := Tool{Slug: "test", Name: "Test", Category: "Testing", BaseURL: upstream.URL, AuthHeader: "X-API-Key", Secret: &secret, Enabled: true, Endpoints: []Endpoint{{ID: "ok", Name: "OK", Path: "/ok", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}, {ID: "fail", Name: "Fail", Path: "/fail", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}}}
 	code, out, _ = request("POST", "/api/admin/tools", tool, adminCookie, adminCSRF, "")
 	require(code, 200, out)
+	testProviderID := int64(out["id"].(float64))
 	var stored string
 	if e = db.QueryRow(ctx, `SELECT secret FROM tools WHERE slug='test'`).Scan(&stored); e != nil || stored == secret || strings.Contains(stored, secret) {
 		t.Fatal("secret not encrypted")
@@ -168,8 +169,71 @@ func TestIntegrationBilling(t *testing.T) {
 	runBody := func(ep string) map[string]any {
 		return map[string]any{"tool": "test", "endpoint": ep, "parameters": map[string]any{}}
 	}
-	code, out, _ = request("POST", "/v1/run", runBody("fail"), nil, "", apiKey)
+	code, out, _ = request("GET", "/v1/catalog?q=OK&limit=1", nil, nil, "", apiKey)
+	require(code, 200, out)
+	catalog := out["data"].(map[string]any)
+	if len(catalog["items"].([]any)) != 1 {
+		t.Fatal("tool search failed")
+	}
+	ref := catalog["items"].([]any)[0].(map[string]any)["tool_ref"].(string)
+	code, out, _ = request("GET", "/v1/catalog/"+ref, nil, nil, "", apiKey)
+	require(code, 200, out)
+	if out["data"].(map[string]any)["price_micros"] != float64(1000000) {
+		t.Fatal("catalog price mismatch")
+	}
+	for _, body := range []any{
+		map[string]any{"tool_ref": ref, "max_cost_micros": 999999},
+		map[string]any{"tool_ref": ref, "max_cost_micros": -1},
+		map[string]any{"tool_ref": ref, "tool": "test", "endpoint": "ok"},
+	} {
+		code, out, _ = request("POST", "/v1/run", body, nil, "", apiKey)
+		if code != 400 && code != 403 {
+			t.Fatalf("invalid run accepted: %d %v", code, out)
+		}
+	}
+	var preflightRuns int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM usage WHERE user_id=$1`, userID).Scan(&preflightRuns); err != nil || preflightRuns != 0 {
+		t.Fatal("preflight rejection created run")
+	}
+	code, out, _ = request("POST", "/v1/run", map[string]any{"tool_ref": toolRef(testProviderID, "fail"), "parameters": map[string]any{}, "max_cost_micros": 1000000}, nil, "", apiKey)
 	require(code, 502, out)
+	failedID := int64(out["id"].(float64))
+	requestID := out["request_id"].(string)
+	if out["settlement"] != "refunded" {
+		t.Fatal("refund state missing")
+	}
+	code, out, _ = request("GET", "/v1/runs?request_id="+requestID, nil, nil, "", apiKey)
+	require(code, 200, out)
+	records := out["data"].(map[string]any)["items"].([]any)
+	if len(records) != 1 || records[0].(map[string]any)["status"] != "failed" {
+		t.Fatal("request correlation failed")
+	}
+	code, out, _ = request("GET", fmt.Sprintf("/v1/runs/%d", failedID), nil, nil, "", apiKey)
+	require(code, 200, out)
+	code, out, _ = request("GET", "/v1/balance", nil, nil, "", apiKey)
+	require(code, 200, out)
+	if out["data"].(map[string]any)["balance_micros"] != float64(5500000) {
+		t.Fatal("API balance mismatch")
+	}
+	code, out, _ = request("GET", "/v1/budgets", nil, nil, "", apiKey)
+	require(code, 200, out)
+	if out["data"].(map[string]any)["resets_at"] == nil {
+		t.Fatal("budget reset absent")
+	}
+	code, out, cookies = request("POST", "/api/auth/register", map[string]string{"email": "other@test.local", "name": "Other", "password": "test-other-password-1234"}, nil, "", "")
+	require(code, 200, out)
+	otherCSRF := out["csrf"].(string)
+	code, out, _ = request("POST", "/api/keys", map[string]string{"label": "other"}, cookies[0], otherCSRF, "")
+	require(code, 201, out)
+	otherKey := out["key"].(string)
+	code, out, _ = request("GET", fmt.Sprintf("/v1/runs/%d", failedID), nil, nil, "", otherKey)
+	require(code, 404, out)
+	code, out, _ = request("GET", "/v1/runs?request_id="+requestID, nil, nil, "", otherKey)
+	require(code, 200, out)
+	if len(out["data"].(map[string]any)["items"].([]any)) != 0 {
+		t.Fatal("another user's records leaked")
+	}
+
 	u, _ := a.user(ctx, userID)
 	if u.Balance != 5500000 {
 		t.Fatal("failed upstream did not refund")

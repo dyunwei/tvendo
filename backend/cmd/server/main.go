@@ -394,6 +394,12 @@ func validateTool(t Tool) error {
 		if e != nil || !strings.HasPrefix(ep.Path, "/") || p.Host != "" || p.RawQuery != "" || p.Fragment != "" || strings.Contains(ep.Path, "..") || strings.HasPrefix(ep.Path, "//") {
 			return errors.New("接口路径需以 / 开头，不含查询参数或 ..")
 		}
+		if len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null" {
+			var schema map[string]any
+			if json.Unmarshal(ep.InputSchema, &schema) != nil || schema == nil {
+				return errors.New("输入 Schema 必须是 JSON 对象")
+			}
+		}
 		if len(ep.Parameters) > 0 && !json.Valid(ep.Parameters) {
 			return errors.New("接口参数示例必须是 JSON")
 		}
@@ -635,13 +641,44 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 		Tool       string         `json:"tool"`
 		Endpoint   string         `json:"endpoint"`
 		Parameters map[string]any `json:"parameters"`
+		ToolRef    string         `json:"tool_ref"`
+		MaxCost    *int64         `json:"max_cost_micros"`
 	}
 	if !decode(w, r, &b) {
 		return
 	}
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = randomToken()
+	}
+	if !requestIDPattern.MatchString(requestID) {
+		fail(w, 400, "请求标识无效")
+		return
+	}
+	w.Header().Set("X-Request-ID", requestID)
+	var providerID int64
+	if b.ToolRef != "" {
+		if b.Tool != "" || b.Endpoint != "" {
+			fail(w, 400, "tool_ref 与 tool/endpoint 不能同时使用")
+			return
+		}
+		var err error
+		providerID, b.Endpoint, err = parseToolRef(b.ToolRef)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+	} else if b.Tool == "" || b.Endpoint == "" {
+		fail(w, 400, "请提供工具与接口标识")
+		return
+	}
+	if b.MaxCost != nil && *b.MaxCost < 0 {
+		fail(w, 400, "费用上限不能为负数")
+		return
+	}
 	var raw []byte
 	var provider Tool
-	e := a.db.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE slug=$1 AND enabled=true`, b.Tool).Scan(&raw)
+	e := a.db.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE enabled=true AND (($1<>'' AND slug=$1) OR ($2::bigint>0 AND id=$2))`, b.Tool, providerID).Scan(&raw)
 	if e != nil || json.Unmarshal(raw, &provider) != nil {
 		fail(w, 404, "工具不存在或未启用")
 		return
@@ -669,6 +706,10 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ep.Price = effectivePrice(provider, ep)
+	if b.MaxCost != nil && ep.Price > *b.MaxCost {
+		agentError(w, 403, "COST_LIMIT_EXCEEDED", "实际售价超出本次费用上限", "not_started", 0, requestID)
+		return
+	}
 	if b.Parameters == nil {
 		b.Parameters = map[string]any{}
 	}
@@ -728,15 +769,15 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bal < ep.Price {
-		fail(w, 402, "余额不足，请联系管理员充值")
+		agentError(w, 402, "INSUFFICIENT_BALANCE", "余额不足，请联系管理员充值", "not_started", 0, requestID)
 		return
 	}
 	if ce && ep.Price > call || de && spent+ep.Price > daily {
-		fail(w, 403, "调用超出预算限制")
+		agentError(w, 403, "BUDGET_EXCEEDED", "调用超出预算限制", "not_started", 0, requestID)
 		return
 	}
 	var runID int64
-	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost) VALUES($1,$2,$3,$4) RETURNING id`, u.ID, name, ep.Path, ep.Price).Scan(&runID)
+	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id) VALUES($1,$2,$3,$4,$5) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID).Scan(&runID)
 	if e != nil {
 		fail(w, 500, "创建调用记录失败")
 		return
@@ -776,18 +817,18 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds()); e != nil {
 		log.Printf("settle run %d: %v", runID, e)
-		fail(w, 503, "结算暂未完成，请在调用记录中查看状态，勿自动重试")
+		agentError(w, 503, "SETTLEMENT_UNKNOWN", "结算暂未完成，请查询调用记录，勿自动重试", "unknown", runID, requestID)
 		return
 	}
 	if !success {
-		fail(w, 502, fmt.Sprintf("上游调用失败（HTTP %d），预留余额已退回。调用编号：%d", status, runID))
+		agentError(w, 502, "UPSTREAM_FAILED", fmt.Sprintf("上游调用失败（HTTP %d），预留余额已退回。调用编号：%d", status, runID), "refunded", runID, requestID)
 		return
 	}
 	var result any
 	if json.Unmarshal(body, &result) != nil {
 		result = string(body)
 	}
-	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result})
+	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result, "request_id": requestID})
 }
 func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64) error {
 	tx, e := a.db.Begin(ctx)
@@ -896,10 +937,18 @@ func (a *App) routes() http.Handler {
 		}
 	})
 	m.HandleFunc("POST /v1/run", a.run)
-	m.HandleFunc("GET /SKILL.md", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		fmt.Fprintf(w, "# T vendo tools\n\nAsk the user for their T vendo API key. Never send this key to any other host.\n\nAPI base: %s\n\n1. GET /v1/tools with Authorization: Bearer <key> to discover enabled tools and their endpoint IDs, prices (integer micro-USD), and parameter examples.\n2. POST /v1/run with Authorization: Bearer <key> and JSON {\"tool\":\"slug\",\"endpoint\":\"endpoint-id\",\"parameters\":{}}. Confirm paid calls with the user.\n3. Result is {id,cost_micros,data}. Failed calls refund the reservation. Do not automatically retry calls with uncertain settlement.\n", a.publicURL)
-	})
+	m.HandleFunc("GET /v1/info", func(w http.ResponseWriter, r *http.Request) { agentOK(w, a.cliInfo()) })
+	m.HandleFunc("GET /v1/catalog", a.withAPI(a.catalog))
+	m.HandleFunc("GET /v1/catalog/{ref}", a.withAPI(a.catalog))
+	m.HandleFunc("GET /v1/runs", a.withAPI(a.agentRuns))
+	m.HandleFunc("GET /v1/runs/{id}", a.withAPI(a.agentRuns))
+	m.HandleFunc("GET /v1/budgets", a.withAPI(a.agentBudget))
+	m.HandleFunc("GET /v1/balance", a.withAPI(func(w http.ResponseWriter, r *http.Request, u User) {
+		agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": "USD"})
+	}))
+	m.HandleFunc("GET /cli/install.sh", a.installer)
+	m.HandleFunc("GET /cli/{name}", a.cliAsset)
+	m.HandleFunc("GET /SKILL.md", a.skill)
 	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	m.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "接口不存在") })
 	dist := env("FRONTEND_DIST", "../frontend/dist")

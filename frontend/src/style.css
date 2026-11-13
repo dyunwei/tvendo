@@ -331,7 +331,9 @@ a svg {
 .command code {
   font-size: 12px;
   flex: 1;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 .dollar {
   color: #868d7e;
