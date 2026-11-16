@@ -34,7 +34,7 @@ curl http://localhost:8080/v1/run \
 
 | 接口 | 参数 / 返回 |
 | --- | --- |
-| `GET /v1/catalog` | q 为可选关键词；limit 默认 10，范围 1–50；cursor 为上页 next_cursor |
+| `GET /v1/catalog` | q 为可选需求或关键词；limit 默认 10，范围 1–50；cursor 为上页 next_cursor。配置模型后混合检索，详情见 [工具搜索](catalog-search.md) |
 | `GET /v1/catalog/{tool_ref}` | 对引用做 URL 路径段编码；返回 Schema、示例、类型及价格 |
 | `GET /v1/runs` | limit 默认 20，范围 1–50；cursor 分页；request_id 可筛选 |
 | `GET /v1/runs/{id}` | 本账户单次调用记录，其他账户记录返回 404 |
@@ -42,6 +42,8 @@ curl http://localhost:8080/v1/run \
 | `GET /v1/budgets` | daily_limit_micros、call_limit_micros、daily_enabled、call_enabled、spent_micros、held_micros、resets_at、currency |
 
 查询成功返回 `{ok:true,data:...}`。目录与调用记录列表的 data 包含 `items`、`next_cursor`；空游标表示没有后页。目录条目含 `currency`、`tool_ref`、name、provider、description、price_micros、schema_available；详情额外含 `input_schema`、`input_example`、`upstream_type`（若已配置）。
+
+目录响应新增 `data.search`，含 mode（directory/keyword/hybrid）、degraded、reason、indexed、total。端点可设置并返回可选 `search_description`。非空查询游标绑定查询和候选顺序，结果顺序改变时返回 400，需从第一页重新搜索。
 
 目录只显示已开放提供商下已启用、未被上游移除的工具。搜索按名称和描述匹配全部空格分隔关键词。`tool_ref` 是稳定的不透明引用，不依赖显示名称，不能自行拼接。
 

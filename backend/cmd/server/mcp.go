@@ -308,6 +308,7 @@ func mergeMCP(old, remote []Endpoint) ([]Endpoint, SyncSummary) {
 		seen[ep.MCPName] = true
 		if was, ok := prior[ep.MCPName]; ok {
 			ep.ID = was.ID
+			ep.SearchDescription = was.SearchDescription
 			ep.Price = was.Price
 			ep.PriceOverride = was.PriceOverride
 			ep.Disabled = was.Disabled
@@ -374,11 +375,12 @@ func (a *App) syncMCP(w http.ResponseWriter, r *http.Request, u User) {
 }
 
 type BulkMCPRequest struct {
-	Revision   int64    `json:"revision"`
-	IDs        []string `json:"ids"`
-	Enabled    *bool    `json:"enabled"`
-	Price      *int64   `json:"price_micros"`
-	UseDefault bool     `json:"use_default"`
+	Revision          int64    `json:"revision"`
+	IDs               []string `json:"ids"`
+	Enabled           *bool    `json:"enabled"`
+	Price             *int64   `json:"price_micros"`
+	UseDefault        bool     `json:"use_default"`
+	SearchDescription *string  `json:"search_description"`
 }
 
 func applyBulk(t Tool, b BulkMCPRequest) ([]Endpoint, error) {
@@ -388,7 +390,10 @@ func applyBulk(t Tool, b BulkMCPRequest) ([]Endpoint, error) {
 	if b.Price != nil && (*b.Price < 0 || *b.Price > 1000000000) || b.Price != nil && b.UseDefault {
 		return nil, errors.New("售价需在 0–1000 元内，不能同时设置单独售价和默认售价")
 	}
-	if b.Enabled == nil && b.Price == nil && !b.UseDefault {
+	if b.SearchDescription != nil && (len(b.IDs) != 1 || len(*b.SearchDescription) > 6000) {
+		return nil, errors.New("检索描述仅支持单个工具，不能超过 6000 字节")
+	}
+	if b.Enabled == nil && b.Price == nil && !b.UseDefault && b.SearchDescription == nil {
 		return nil, errors.New("请选择操作")
 	}
 	selected := map[string]bool{}
@@ -402,6 +407,9 @@ func applyBulk(t Tool, b BulkMCPRequest) ([]Endpoint, error) {
 			continue
 		}
 		delete(selected, ep.ID)
+		if b.SearchDescription != nil {
+			ep.SearchDescription = strings.TrimSpace(*b.SearchDescription)
+		}
 		if b.Enabled != nil {
 			if *b.Enabled && ep.Missing {
 				return nil, errors.New("不能启用上游已删除的工具")

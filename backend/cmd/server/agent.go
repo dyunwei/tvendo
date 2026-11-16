@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -39,16 +38,17 @@ func agentOK(w http.ResponseWriter, data any) {
 }
 
 type catalogItem struct {
-	Currency        string          `json:"currency"`
-	Ref             string          `json:"tool_ref"`
-	Name            string          `json:"name"`
-	Provider        string          `json:"provider"`
-	Description     string          `json:"description"`
-	Price           int64           `json:"price_micros"`
-	InputSchema     json.RawMessage `json:"input_schema,omitempty"`
-	Example         json.RawMessage `json:"input_example,omitempty"`
-	Type            string          `json:"upstream_type,omitempty"`
-	SchemaAvailable bool            `json:"schema_available"`
+	Currency          string          `json:"currency"`
+	Ref               string          `json:"tool_ref"`
+	Name              string          `json:"name"`
+	Provider          string          `json:"provider"`
+	Description       string          `json:"description"`
+	SearchDescription string          `json:"search_description,omitempty"`
+	Price             int64           `json:"price_micros"`
+	InputSchema       json.RawMessage `json:"input_schema,omitempty"`
+	Example           json.RawMessage `json:"input_example,omitempty"`
+	Type              string          `json:"upstream_type,omitempty"`
+	SchemaAvailable   bool            `json:"schema_available"`
 }
 
 func pageLimit(r *http.Request, fallback int) (int, error) {
@@ -67,71 +67,41 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, err.Error())
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE enabled=true ORDER BY id`)
+	docs, err := a.catalogDocuments(r.Context())
 	if err != nil {
 		fail(w, 500, "无法读取工具目录")
 		return
 	}
-	defer rows.Close()
-	items := []catalogItem{}
-	query := strings.Fields(strings.ToLower(r.URL.Query().Get("q")))
-	for rows.Next() {
-		var raw []byte
-		var t Tool
-		if rows.Scan(&raw) != nil || json.Unmarshal(raw, &t) != nil {
-			fail(w, 500, "工具配置错误")
-			return
-		}
-		for _, ep := range t.Endpoints {
-			if ep.Disabled || ep.Missing {
-				continue
-			}
-			item := catalogItem{Currency: billing.Currency, Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: strings.TrimSpace(ep.Description + " " + t.Description), Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: endpointExample(t, ep), Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
-			if ref := r.PathValue("ref"); ref != "" {
-				if ref == item.Ref {
-					agentOK(w, item)
-					return
-				}
-				continue
-			}
-			haystack := strings.ToLower(t.Slug + " " + t.Name + " " + ep.ID + " " + ep.Name + " " + item.Description)
-			matches := true
-			for _, term := range query {
-				if !strings.Contains(haystack, term) {
-					matches = false
-					break
-				}
-			}
-			if matches {
-				items = append(items, item)
+	if ref := r.PathValue("ref"); ref != "" {
+		for _, d := range docs {
+			if d.item.Ref == ref {
+				agentOK(w, d.item)
+				return
 			}
 		}
-	}
-	if rows.Err() != nil {
-		fail(w, 500, "读取工具目录失败")
-		return
-	}
-	if r.PathValue("ref") != "" {
 		fail(w, 404, "工具不存在或未启用")
 		return
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Ref < items[j].Ref })
-	cursor := r.URL.Query().Get("cursor")
-	start := sort.Search(len(items), func(i int) bool { return items[i].Ref > cursor })
-	end := start + limit
-	if end > len(items) {
-		end = len(items)
+	query := strings.ToLower(strings.Join(strings.Fields(r.URL.Query().Get("q")), " "))
+	if len(query) > 4096 {
+		fail(w, 400, "搜索关键词不能超过 4096 字节")
+		return
 	}
-	page := append([]catalogItem{}, items[start:end]...)
-	for i := range page {
-		page[i].InputSchema = nil
-		page[i].Example = nil
+	items := make([]catalogItem, 0, len(docs))
+	status := searchStatus{Mode: "directory", Total: len(docs)}
+	if query == "" {
+		for _, d := range docs {
+			items = append(items, d.item)
+		}
+	} else {
+		items, status = a.searchCatalog(r.Context(), docs, query)
 	}
-	next := ""
-	if end < len(items) {
-		next = items[end-1].Ref
+	page, next, err := catalogPage(items, query, r.URL.Query().Get("cursor"), limit)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
 	}
-	agentOK(w, map[string]any{"items": page, "next_cursor": next, "currency": billing.Currency})
+	agentOK(w, map[string]any{"items": page, "next_cursor": next, "currency": billing.Currency, "search": status})
 }
 func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 	limit, err := pageLimit(r, 20)

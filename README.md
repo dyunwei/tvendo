@@ -86,3 +86,5 @@ tvendo tools search '网页搜索' --json
 Copyright © 2026 dyunwei。
 
 本项目采用 [GNU LGPL v3](LICENSE)（`LGPL-3.0-only`），附带其引用的 [GNU GPL v3 条款](COPYING.GPL-3)。
+
+可接入 CPU embedding 服务以支持中文需求检索英文工具描述，配置与验收见 [工具目录混合搜索](docs/catalog-search.md)。

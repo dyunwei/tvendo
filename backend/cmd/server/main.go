@@ -39,6 +39,7 @@ type App struct {
 	publicURL string
 	secure    bool
 	client    *http.Client
+	search    *catalogSearch
 }
 type User struct {
 	KeyID        int64  `json:"-"`
@@ -59,19 +60,20 @@ type Session struct {
 	CSRF   string `json:"csrf"`
 }
 type Endpoint struct {
-	MCPName       string          `json:"mcp_name,omitempty"`
-	InputSchema   json.RawMessage `json:"input_schema,omitempty"`
-	Disabled      bool            `json:"disabled,omitempty"`
-	Missing       bool            `json:"missing,omitempty"`
-	SchemaChanged bool            `json:"schema_changed,omitempty"`
-	PriceOverride bool            `json:"price_override,omitempty"`
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Path          string          `json:"path"`
-	Method        string          `json:"method"`
-	Description   string          `json:"description"`
-	Price         int64           `json:"price_micros"`
-	Parameters    json.RawMessage `json:"parameters"`
+	MCPName           string          `json:"mcp_name,omitempty"`
+	InputSchema       json.RawMessage `json:"input_schema,omitempty"`
+	Disabled          bool            `json:"disabled,omitempty"`
+	Missing           bool            `json:"missing,omitempty"`
+	SchemaChanged     bool            `json:"schema_changed,omitempty"`
+	PriceOverride     bool            `json:"price_override,omitempty"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	Path              string          `json:"path"`
+	Method            string          `json:"method"`
+	Description       string          `json:"description"`
+	SearchDescription string          `json:"search_description,omitempty"`
+	Price             int64           `json:"price_micros"`
+	Parameters        json.RawMessage `json:"parameters"`
 }
 type Resource struct {
 	Name        string `json:"name"`
@@ -388,6 +390,9 @@ func validateTool(t Tool) error {
 	for _, ep := range t.Endpoints {
 		if (t.UpstreamType == "http" || t.UpstreamType == "") && !validSlug(ep.ID) || ep.ID == "" || ids[ep.ID] || ep.Name == "" || ep.Price < 0 || ep.Price > 1000000000 {
 			return errors.New("接口标识需唯一且有效，名称必填，售价需在 0–1000 元内")
+		}
+		if len(ep.SearchDescription) > 6000 {
+			return errors.New("检索描述不能超过 6000 字节")
 		}
 		ids[ep.ID] = true
 		if isMCP(t) {
@@ -1045,6 +1050,13 @@ func main() {
 	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
 	if e = a.bootstrap(ctx); e != nil {
 		log.Fatal(e)
+	}
+	a.search, e = newCatalogSearch()
+	if e != nil {
+		log.Fatal(e)
+	}
+	if a.search != nil {
+		go a.runSearchIndexer(ctx)
 	}
 	a.recoverRuns(ctx)
 	go func() {

@@ -21,11 +21,20 @@ const syncing = ref(false),
   selected = ref<string[]>([]),
   price = ref(0.001),
   detail = ref<Endpoint | null>(null),
-  singlePrices = ref<Record<string, number>>({});
+  singlePrices = ref<Record<string, number>>({}),
+  searchDescriptions = ref<Record<string, string>>({});
 const matched = computed(() =>
   props.provider.endpoints.filter(
     (ep) =>
-      (ep.name + " " + ep.mcp_name + " " + ep.description)
+      (
+        ep.name +
+        " " +
+        ep.mcp_name +
+        " " +
+        ep.description +
+        " " +
+        (ep.search_description || "")
+      )
         .toLowerCase()
         .includes(query.value.toLowerCase()) &&
       (filter.value === "all" ||
@@ -46,6 +55,7 @@ watch(
   () => {
     selected.value = [];
     singlePrices.value = {};
+    searchDescriptions.value = {};
   },
 );
 function selectMatched() {
@@ -267,6 +277,43 @@ function setPrice(ids = selected.value) {
                 <p v-if="detail?.id === ep.id" class="mcp-description">
                   {{ ep.description }}
                 </p>
+                <div v-if="detail?.id === ep.id" class="mcp-description">
+                  <label :for="'search-description-' + ep.id"
+                    >检索补充说明</label
+                  >
+                  <textarea
+                    :id="'search-description-' + ep.id"
+                    :value="
+                      searchDescriptions[ep.id] ?? ep.search_description ?? ''
+                    "
+                    @input="
+                      searchDescriptions[ep.id] = (
+                        $event.target as HTMLTextAreaElement
+                      ).value
+                    "
+                    :disabled="locked"
+                    rows="4"
+                    placeholder="根据真实接口能力补充适用任务和限制。上游同步会保留此说明。"
+                  />
+                  <button
+                    type="button"
+                    class="btn"
+                    :disabled="locked"
+                    @click="
+                      bulk(
+                        {
+                          search_description:
+                            searchDescriptions[ep.id] ??
+                            ep.search_description ??
+                            '',
+                        },
+                        [ep.id],
+                      )
+                    "
+                  >
+                    保存检索说明
+                  </button>
+                </div>
                 <pre v-if="detail?.id === ep.id" class="mcp-schema">{{
                   JSON.stringify(ep.input_schema, null, 2)
                 }}</pre>

@@ -13,6 +13,13 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      SEARCH_EMBEDDING_URL: ${SEARCH_EMBEDDING_URL:-}
+      SEARCH_EMBEDDING_MODEL: ${SEARCH_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}
+      SEARCH_EMBEDDING_REVISION: ${SEARCH_EMBEDDING_REVISION:-1}
+      SEARCH_EMBEDDING_API_KEY: ${SEARCH_EMBEDDING_API_KEY:-}
+      SEARCH_MIN_SCORE: ${SEARCH_MIN_SCORE:-0.75}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

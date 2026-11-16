@@ -19,6 +19,7 @@ export interface Endpoint {
   path: string;
   method: string;
   description: string;
+  search_description?: string;
   price_micros: number;
   parameters: unknown;
 }

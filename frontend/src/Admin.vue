@@ -132,6 +132,7 @@ function addEndpoint() {
       path: "/search",
       method: "POST",
       description: "接口能力说明",
+      search_description: "",
       price_micros: 1000,
       parameters: { query: "example" },
       input_schema: {
@@ -698,7 +699,7 @@ function downloadExample() {
                   spellcheck="false"
                   aria-label="接口 JSON 配置"
                 /><small
-                  >字段：id（唯一标识）、name、path、method、description、price_micros、input_schema（JSON
+                  >字段：id（唯一标识）、name、path、method、description、search_description（可选，补充适用任务和能力限制）、price_micros、input_schema（JSON
                   Schema）、parameters（参数示例，不能替代 Schema）。支持 GET /
                   POST / PUT / PATCH /
                   DELETE。此版本不支持参数映射、动态路径或流式返回。</small

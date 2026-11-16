@@ -43,3 +43,16 @@ CREATE INDEX IF NOT EXISTS usage_user_request ON usage(user_id, request_id);
 
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS error_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS error_message TEXT NOT NULL DEFAULT '';
+
+-- One vector per endpoint/model configuration. Hashes invalidate changed descriptions;
+-- a model revision change builds a separate index without serving old vectors.
+CREATE TABLE IF NOT EXISTS catalog_embeddings (
+ tool_id BIGINT NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+ endpoint_id TEXT NOT NULL,
+ model_key TEXT NOT NULL,
+ document_hash TEXT NOT NULL,
+ embedding DOUBLE PRECISION[] NOT NULL,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY (tool_id, endpoint_id, model_key)
+);
+CREATE INDEX IF NOT EXISTS catalog_embeddings_model ON catalog_embeddings(model_key);

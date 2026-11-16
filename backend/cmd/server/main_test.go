@@ -190,6 +190,7 @@ func TestIntegrationBilling(t *testing.T) {
 	if out["data"].(map[string]any)["price_micros"] != float64(1000000) {
 		t.Fatal("catalog price mismatch")
 	}
+	verifyCatalogSearchIntegration(t, a)
 	for _, body := range []any{
 		map[string]any{"tool_ref": ref, "max_cost_micros": 999999},
 		map[string]any{"tool_ref": ref, "max_cost_micros": -1},
