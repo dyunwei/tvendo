@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { copyText } from "./clipboard";
 import { useRoute } from "vue-router";
 import {
   BookOpen,
@@ -21,7 +22,7 @@ const snippet = computed(
 );
 async function copy() {
   try {
-    await navigator.clipboard.writeText(snippet.value);
+    await copyText(snippet.value);
     copied.value = true;
     setTimeout(() => (copied.value = false), 2000);
   } catch {

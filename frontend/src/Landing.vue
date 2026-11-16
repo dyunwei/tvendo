@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { copyText } from "./clipboard";
 import {
   ArrowRight,
   Copy,
@@ -21,7 +22,7 @@ const command = computed(
 );
 async function copy() {
   try {
-    await navigator.clipboard.writeText(command.value);
+    await copyText(command.value);
     copied.value = true;
     setTimeout(() => (copied.value = false), 2000);
   } catch {

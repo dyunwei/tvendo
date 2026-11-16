@@ -204,6 +204,29 @@ func TestIntegrationBilling(t *testing.T) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM usage WHERE user_id=$1`, userID).Scan(&preflightRuns); err != nil || preflightRuns != 0 {
 		t.Fatal("preflight rejection created run")
 	}
+	// Console calls require a login and CSRF token; a browser session alone
+	// must not grant access to the public API-key endpoint.
+	code, out, _ = request("POST", "/api/run", runBody("ok"), nil, "", apiKey)
+	require(code, 401, out)
+	for _, csrf := range []string{"", "invalid"} {
+		code, out, _ = request("POST", "/api/run", runBody("ok"), userCookie, csrf, "")
+		require(code, 403, out)
+	}
+	code, out, _ = request("POST", "/v1/run", runBody("ok"), userCookie, userCSRF, "")
+	require(code, 401, out)
+	code, out, _ = request("POST", "/api/run", runBody("ok"), userCookie, userCSRF, "")
+	require(code, 200, out)
+	consoleRunID := int64(out["id"].(float64))
+	var consoleUserID, consoleCost int64
+	if err := db.QueryRow(ctx, `SELECT user_id,cost FROM usage WHERE id=$1 AND status='success'`, consoleRunID).Scan(&consoleUserID, &consoleCost); err != nil || consoleUserID != userID || consoleCost != 1000000 {
+		t.Fatalf("console call not billed to logged-in user: user=%d cost=%d err=%v", consoleUserID, consoleCost, err)
+	}
+	consoleUser, err := a.user(ctx, userID)
+	if err != nil || consoleUser.Balance != 4500000 {
+		t.Fatalf("console balance=%d err=%v", consoleUser.Balance, err)
+	}
+	code, out, _ = request("POST", "/api/admin/topup", map[string]any{"user_id": userID, "amount": 1000000, "note": "restore console test deposit"}, adminCookie, adminCSRF, "")
+	require(code, 200, out)
 	code, out, _ = request("POST", "/v1/run", map[string]any{"tool_ref": toolRef(testProviderID, "fail"), "parameters": map[string]any{}, "max_cost_micros": 1000000}, nil, "", apiKey)
 	require(code, 502, out)
 	failedID := int64(out["id"].(float64))
@@ -241,6 +264,10 @@ func TestIntegrationBilling(t *testing.T) {
 	code, out, cookies = request("POST", "/api/auth/register", map[string]string{"email": "other@test.local", "name": "Other", "password": "test-other-password-1234"}, nil, "", "")
 	require(code, 200, out)
 	otherCSRF := out["csrf"].(string)
+	// A newly registered account can test without creating an API key,
+	// but still needs sufficient balance in its own wallet.
+	code, out, _ = request("POST", "/api/run", runBody("ok"), cookies[0], otherCSRF, "")
+	require(code, 402, out)
 	code, out, _ = request("POST", "/api/keys", map[string]string{"label": "other"}, cookies[0], otherCSRF, "")
 	require(code, 201, out)
 	otherKey := out["key"].(string)
@@ -259,6 +286,8 @@ func TestIntegrationBilling(t *testing.T) {
 	code, out, _ = request("PUT", "/api/budgets", map[string]any{"daily_limit": 500000, "daily_enabled": true, "call_limit": 2000000, "call_enabled": true}, userCookie, userCSRF, "")
 	require(code, 200, out)
 	code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", apiKey)
+	require(code, 403, out)
+	code, out, _ = request("POST", "/api/run", runBody("ok"), userCookie, userCSRF, "")
 	require(code, 403, out)
 	code, out, _ = request("PUT", "/api/budgets", map[string]any{"daily_limit": 10000000, "daily_enabled": false, "call_limit": 500000, "call_enabled": true}, userCookie, userCSRF, "")
 	require(code, 200, out)

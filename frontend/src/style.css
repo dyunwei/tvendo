@@ -2450,6 +2450,17 @@ td:last-child {
   overflow-wrap: anywhere;
   margin: 23px 0;
 }
+.modal .secret-value {
+  display: block;
+  width: 100%;
+  padding: 17px;
+  margin: 23px 0;
+  background: #f6f6f6;
+  font: 12px/1.8 monospace;
+  resize: none;
+  color: inherit;
+  user-select: text;
+}
 .result-code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

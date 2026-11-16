@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Rocket,
@@ -33,6 +33,7 @@ import {
   AlertCircle,
 } from "lucide-vue-next";
 import Admin from "./Admin.vue";
+import { copyText } from "./clipboard";
 import { api, session, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
 const route = useRoute(),
@@ -82,6 +83,15 @@ const dailyInput = ref(3),
   revokeID = ref<number | null>(null),
   copied = ref(false),
   agent = ref("通用 Agent");
+const copyError = ref("");
+let copyTimer: ReturnType<typeof setTimeout> | undefined;
+function resetCopy() {
+  clearTimeout(copyTimer);
+  copied.value = false;
+  copyError.value = "";
+}
+watch(newKey, resetCopy);
+onUnmounted(() => clearTimeout(copyTimer));
 const categories = computed(() => [
   "全部",
   ...new Set(tools.value.map((t) => t.category)),
@@ -118,7 +128,6 @@ const base = window.location.origin,
   command = `请读取 ${base}/SKILL.md，帮我配置 Tvendo 工具接入。`;
 const invocation = ref<Endpoint | null>(null),
   params = ref("{}"),
-  invokeKey = ref(""),
   invokeResult = ref(""),
   invoking = ref(false);
 const spentPct = computed(() =>
@@ -211,12 +220,15 @@ async function logout() {
   }
 }
 async function copy(v: string) {
+  resetCopy();
   try {
-    await navigator.clipboard.writeText(v);
+    await copyText(v);
     copied.value = true;
-    setTimeout(() => (copied.value = false), 2000);
+    copyTimer = setTimeout(() => (copied.value = false), 2000);
   } catch {
-    error.value = "无法访问剪贴板，请手动选择复制";
+    const message = "自动复制失败，请点击密钥文本全选后手动复制（手机可长按复制）。";
+    if (newKey.value) copyError.value = message;
+    else error.value = "自动复制失败，请手动选择文本复制。";
   }
 }
 async function createKey() {
@@ -273,7 +285,6 @@ async function saveBudget() {
 function openInvoke(ep: Endpoint) {
   invocation.value = ep;
   params.value = JSON.stringify(ep.parameters || {}, null, 2);
-  invokeKey.value = "";
   invokeResult.value = "";
 }
 async function invoke() {
@@ -288,9 +299,8 @@ async function invoke() {
       Array.isArray(parameters)
     )
       throw new Error("参数必须是 JSON 对象");
-    const d = await api("/v1/run", {
+    const d = await api("/api/run", {
       method: "POST",
-      headers: { Authorization: "Bearer " + invokeKey.value },
       body: JSON.stringify({
         tool: tool.value.slug,
         endpoint: invocation.value.id,
@@ -1088,14 +1098,6 @@ const statusLabel = (s: string) =>
     ><div
       v-if="creating || newKey || revokeID !== null || invocation"
       class="modal-backdrop"
-      @click.self="
-        !busy &&
-        !invoking &&
-        ((creating = false),
-        (newKey = ''),
-        (revokeID = null),
-        (invocation = null))
-      "
     >
       <section
         class="modal"
@@ -1136,10 +1138,18 @@ const statusLabel = (s: string) =>
           ><span class="modal-icon success-icon"><CheckCircle2 /></span>
           <h2>密钥已创建</h2>
           <p>完整密钥仅展示这一次。请复制并保存到安全的地方。</p>
-          <div class="secret-display">
-            <code>{{ newKey }}</code>
-          </div>
-          <button class="btn primary full" @click="copy(newKey)">
+          <textarea
+            class="secret-display secret-value"
+            :value="newKey"
+            readonly
+            rows="3"
+            aria-label="新建的 API 密钥，点击全选"
+            spellcheck="false"
+            @focus="($event.target as HTMLTextAreaElement).select()"
+            @click="($event.target as HTMLTextAreaElement).select()"
+          />
+          <p v-if="copyError" class="alert error" role="alert">{{ copyError }}</p>
+          <button class="btn primary full" aria-live="polite" @click="copy(newKey)">
             <Check v-if="copied" :size="16" /><Copy v-else :size="16" />{{
               copied ? "已复制" : "复制密钥"
             }}</button
@@ -1166,14 +1176,7 @@ const statusLabel = (s: string) =>
               money(invocation.price_micros)
             }}</strong>。点击执行后将调用真实上游并结算费用。
           </p>
-          <label
-            >平台 API Key<input
-              v-model="invokeKey"
-              type="password"
-              required
-              autocomplete="off"
-              placeholder="tv_live_…（仅在本次弹窗使用）"
-          /></label>
+          <p>已关联当前登录账号，调用费用将从当前账号余额扣除。</p>
           <details v-if="invocation.input_schema" class="mcp-input-reference">
             <summary>查看参数 Schema</summary>
             <pre class="mcp-schema">{{

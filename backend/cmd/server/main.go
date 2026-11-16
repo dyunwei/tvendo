@@ -636,6 +636,11 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	a.runAsUser(w, r, u)
+}
+
+// Both API clients and the console share the same billing and budget checks.
+func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	if !a.rate(r, "run", 120) {
 		fail(w, 429, "调用频率超限")
 		return
@@ -912,6 +917,7 @@ func (a *App) routes() http.Handler {
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
 	m.HandleFunc("GET /api/tools", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, false) }))
+	m.HandleFunc("POST /api/run", a.withUser(false, a.runAsUser))
 	m.HandleFunc("GET /api/keys", a.withUser(false, a.keys))
 	m.HandleFunc("POST /api/keys", a.withUser(false, a.keys))
 	m.HandleFunc("DELETE /api/keys/{id}", a.withUser(false, a.keys))
