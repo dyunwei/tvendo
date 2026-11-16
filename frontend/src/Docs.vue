@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PaginatedTable from "./components/PaginatedTable.vue";
+import TableText from "./components/TableText.vue";
 import { ref, computed } from "vue";
 import { copyText } from "./clipboard";
 import { useRoute } from "vue-router";
@@ -29,6 +31,16 @@ async function copy() {
     copied.value = false;
   }
 }
+const errorStatuses = [
+  ["400", "参数或配置无效"],
+  ["401", "密钥无效或已撤销"],
+  ["402", "余额不足"],
+  ["403", "超出预算"],
+  ["404", "工具或接口不存在"],
+  ["429", "请求频率过高"],
+  ["502", "上游失败，已退还预留金额"],
+  ["503", "结算暂未完成，请查询用量，避免自动重试"],
+];
 const items = [
   { id: "quickstart", name: "快速开始", icon: Zap },
   { id: "skill", name: "Agent Skill", icon: BookOpen },
@@ -139,32 +151,27 @@ const items = [
         <h3>成功响应</h3>
         <pre>{ "id": 42, "cost_micros": 1000, "data": { ... } }</pre>
         <h3>错误状态</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>状态码</th>
-              <th>含义</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="x in [
-                ['400', '参数或配置无效'],
-                ['401', '密钥无效或已撤销'],
-                ['402', '余额不足'],
-                ['403', '超出预算'],
-                ['404', '工具或接口不存在'],
-                ['429', '请求频率过高'],
-                ['502', '上游失败，已退还预留金额'],
-                ['503', '结算暂未完成，请查询用量，避免自动重试'],
-              ]"
-              :key="x[0]"
-            >
-              <td>{{ x[0] }}</td>
-              <td>{{ x[1] }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <PaginatedTable
+          :items="errorStatuses"
+          :reset-key="tab"
+          label="错误状态分页"
+          v-slot="{ rows }"
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>状态码</th>
+                <th>含义</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="x in rows" :key="x[0]">
+                <td>{{ x[0] }}</td>
+                <td><TableText :text="x[1]" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </PaginatedTable>
         <div class="alert">
           当前支持同步 HTTP / JSON 和远程 MCP 工具调用，超时 60 秒，最大响应 8
           MB。异步任务、流式响应、浏览器资源租赁暂未实现。

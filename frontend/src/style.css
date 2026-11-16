@@ -2048,18 +2048,6 @@ th:last-child,
 td:last-child {
   padding-right: 24px;
 }
-.table-footer {
-  font-size: 10px;
-  padding: 18px 24px;
-  border-top: 1px solid #f3f3f3;
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  color: #adadad;
-}
-.table-footer span {
-  font-size: 9px;
-}
 .permission {
   font: 8px monospace;
   border: 1px solid #e1e1e1;
@@ -2229,13 +2217,6 @@ td:last-child {
   font-size: 9px;
   margin-top: 6px;
   color: #afafaf;
-}
-.usage-name {
-  display: block;
-  max-width: 10em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .status {
   display: inline-flex;
@@ -3451,13 +3432,6 @@ td:last-child {
   .empty-state p {
     font-size: 10px;
   }
-  .table-footer {
-    font-size: 9px;
-    padding: 14px 17px;
-  }
-  .table-footer span {
-    display: none;
-  }
   .tip {
     font-size: 9px;
     align-items: flex-start;
@@ -3878,18 +3852,6 @@ td:last-child {
   overflow: auto;
   color: #555;
 }
-.mcp-pagination {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin: 15px 0 5px;
-}
-.mcp-pagination > span {
-  margin-right: auto;
-  font-size: 10px;
-  color: #777;
-}
 @media (max-width: 540px) {
   .mcp-filters {
     grid-template-columns: 1fr;
@@ -3902,9 +3864,6 @@ td:last-child {
   }
   .mcp-price-bar {
     gap: 10px;
-  }
-  .mcp-pagination .btn {
-    font-size: 9px;
   }
 }
 .modal .mcp-single-price {
@@ -3929,9 +3888,6 @@ td:last-child {
 }
 .modal-backdrop .status.running i {
   background: var(--icon-accent);
-}
-.mcp-table {
-  max-height: min(440px, 45vh);
 }
 .mcp-table th {
   position: sticky;
@@ -3961,4 +3917,105 @@ td:last-child {
 }
 .landing :is(.steps code, .blue-cta .btn.white) {
   color: #6258d2;
+}
+
+/* Shared table presentation and pagination across the console and docs. */
+.data-table {
+  min-width: 0;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.data-table-scroll {
+  overflow-x: auto;
+}
+.data-table table {
+  margin: 0;
+}
+.data-table th,
+.data-table td {
+  padding: 16px 18px;
+  vertical-align: middle;
+}
+.data-table th {
+  background: #f8f9f7;
+  color: #707070;
+  font-size: 11px;
+}
+.data-table td {
+  color: #666;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.data-table tbody tr:hover {
+  background: #fafaf9;
+}
+.data-table .table-text {
+  display: inline-block;
+  width: 20ch;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.data-table .cell-sub .table-text {
+  vertical-align: top;
+}
+.data-table-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--line);
+  color: #707070;
+  font-size: 12px;
+  white-space: normal;
+}
+.data-table-summary {
+  display: grid;
+  gap: 5px;
+}
+.data-table-summary small {
+  font-size: 11px;
+  color: #898b86;
+}
+.data-table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.data-table-page {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.data-table-controls button:disabled {
+  cursor: not-allowed;
+  transform: none;
+}
+.mcp-table {
+  max-height: none;
+}
+.mcp-table .data-table-scroll {
+  max-height: min(440px, 45vh);
+  overflow: auto;
+}
+.mcp-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 540px) {
+  .data-table-pagination {
+    padding: 12px;
+  }
+  .data-table-controls {
+    gap: 6px;
+  }
+  .data-table-controls .btn {
+    padding: 7px 8px;
+  }
 }

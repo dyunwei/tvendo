@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PaginatedTable from "./components/PaginatedTable.vue";
+import TableText from "./components/TableText.vue";
 import { computed, ref, watch } from "vue";
 import {
   RefreshCw,
@@ -6,8 +8,6 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronDown,
-  ArrowLeft,
-  ArrowRight,
 } from "lucide-vue-next";
 import { api, money, date } from "./api";
 import type { Tool, Endpoint } from "./api";
@@ -19,11 +19,9 @@ const syncing = ref(false),
   query = ref(""),
   filter = ref("all"),
   selected = ref<string[]>([]),
-  page = ref(1),
   price = ref(0.001),
   detail = ref<Endpoint | null>(null),
   singlePrices = ref<Record<string, number>>({});
-const pageSize = 30;
 const matched = computed(() =>
   props.provider.endpoints.filter(
     (ep) =>
@@ -37,27 +35,17 @@ const matched = computed(() =>
         (filter.value === "changed" && ep.schema_changed)),
   ),
 );
-const pages = computed(() =>
-  Math.max(1, Math.ceil(matched.value.length / pageSize)),
-);
-const rows = computed(() =>
-  matched.value.slice((page.value - 1) * pageSize, page.value * pageSize),
-);
 const allMatched = computed(
   () =>
     matched.value.length > 0 &&
     matched.value.every((ep) => selected.value.includes(ep.id)),
 );
 const locked = computed(() => syncing.value || busy.value);
-watch([query, filter], () => {
-  page.value = 1;
-});
 watch(
   () => props.provider.revision,
   () => {
     selected.value = [];
     singlePrices.value = {};
-    page.value = Math.min(page.value, pages.value);
   },
 );
 function selectMatched() {
@@ -227,124 +215,119 @@ function setPrice(ids = selected.value) {
       </button>
     </div>
     <div class="panel table-wrap mcp-table">
-      <table>
-        <thead>
-          <tr>
-            <th />
-            <th>工具 / 状态</th>
-            <th>单次售价</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="ep in rows" :key="ep.id">
-            <td>
-              <input
-                v-model="selected"
-                :value="ep.id"
-                type="checkbox"
-                :aria-label="'选择 ' + ep.name"
-                :disabled="locked"
-              />
-            </td>
-            <td>
-              <button
-                type="button"
-                class="mcp-name"
-                @click="detail = detail?.id === ep.id ? null : ep"
-              >
-                {{ ep.name }} <ChevronDown :size="12" /></button
-              ><small class="cell-sub mono">{{ ep.mcp_name }}</small
-              ><span
-                class="status"
-                :class="
-                  ep.missing ? 'failed' : ep.disabled ? 'paused' : 'success'
-                "
-                ><i />{{
-                  ep.missing ? "上游已删除" : ep.disabled ? "未启用" : "已启用"
-                }}</span
-              ><span v-if="ep.schema_changed" class="badge">参数待复核</span>
-              <p v-if="detail?.id === ep.id" class="mcp-description">
-                {{ ep.description }}
-              </p>
-              <pre v-if="detail?.id === ep.id" class="mcp-schema">{{
-                JSON.stringify(ep.input_schema, null, 2)
-              }}</pre>
-            </td>
-            <td>
-              {{ money(effective(ep))
-              }}<input
-                class="mcp-single-price"
-                type="number"
-                min="0"
-                max="1000"
-                step="0.000001"
-                :value="singlePrices[ep.id] ?? effective(ep) / 1e6"
-                @input="
-                  singlePrices[ep.id] = Number(
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-                :aria-label="'单独售价 ' + ep.name"
-                :disabled="locked"
-              /><small class="cell-sub">{{
-                ep.price_override ? "单独售价" : "跟随默认价"
-              }}</small>
-            </td>
-            <td>
-              <button
-                type="button"
-                class="btn outline small"
-                @click="bulk({ enabled: !!ep.disabled }, [ep.id])"
-                :disabled="locked || ep.missing"
-              >
-                {{ ep.disabled ? "启用" : "停用" }}</button><button
-                type="button"
-                class="btn outline small"
-                @click="setSinglePrice(ep)"
-                :disabled="locked"
-              >
-                单独改价</button
-              ><button
-                v-if="ep.price_override"
-                type="button"
-                class="btn outline small"
-                @click="bulk({ use_default: true }, [ep.id])"
-                :disabled="locked"
-              >
-                恢复默认
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!rows.length">
-            <td colspan="4" class="empty-cell">
-              {{
-                provider.endpoints.length
-                  ? "没有符合筛选条件的工具"
-                  : "尚未同步工具，请点击「测试连接并同步」"
-              }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="mcp-pagination">
-      <span>第 {{ page }} / {{ pages }} 页 · {{ matched.length }} 个工具</span
-      ><button
-        type="button"
-        class="btn outline small"
-        @click="page--"
-        :disabled="page <= 1"
+      <PaginatedTable
+        :items="matched"
+        :reset-key="query + '|' + filter + '|' + provider.id"
+        label="MCP 工具分页"
+        v-slot="{ rows }"
       >
-        <ArrowLeft :size="13" />上一页</button
-      ><button
-        type="button"
-        class="btn outline small"
-        @click="page++"
-        :disabled="page >= pages"
-      >
-        下一页<ArrowRight :size="13" />
-      </button>
+        <table>
+          <thead>
+            <tr>
+              <th />
+              <th>工具 / 状态</th>
+              <th>单次售价</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="ep in rows" :key="ep.id">
+              <td>
+                <input
+                  v-model="selected"
+                  :value="ep.id"
+                  type="checkbox"
+                  :aria-label="'选择 ' + ep.name"
+                  :disabled="locked"
+                />
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="mcp-name"
+                  @click="detail = detail?.id === ep.id ? null : ep"
+                >
+                  <TableText :text="ep.name" />
+                  <ChevronDown :size="12" /></button
+                ><small class="cell-sub mono"
+                  ><TableText :text="ep.mcp_name" /></small
+                ><span
+                  class="status"
+                  :class="
+                    ep.missing ? 'failed' : ep.disabled ? 'paused' : 'success'
+                  "
+                  ><i />{{
+                    ep.missing
+                      ? "上游已删除"
+                      : ep.disabled
+                        ? "未启用"
+                        : "已启用"
+                  }}</span
+                ><span v-if="ep.schema_changed" class="badge">参数待复核</span>
+                <p v-if="detail?.id === ep.id" class="mcp-description">
+                  {{ ep.description }}
+                </p>
+                <pre v-if="detail?.id === ep.id" class="mcp-schema">{{
+                  JSON.stringify(ep.input_schema, null, 2)
+                }}</pre>
+              </td>
+              <td>
+                {{ money(effective(ep))
+                }}<input
+                  class="mcp-single-price"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.000001"
+                  :value="singlePrices[ep.id] ?? effective(ep) / 1e6"
+                  @input="
+                    singlePrices[ep.id] = Number(
+                      ($event.target as HTMLInputElement).value,
+                    )
+                  "
+                  :aria-label="'单独售价 ' + ep.name"
+                  :disabled="locked"
+                /><small class="cell-sub">{{
+                  ep.price_override ? "单独售价" : "跟随默认价"
+                }}</small>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="btn outline small"
+                  @click="bulk({ enabled: !!ep.disabled }, [ep.id])"
+                  :disabled="locked || ep.missing"
+                >
+                  {{ ep.disabled ? "启用" : "停用" }}</button><button
+                  type="button"
+                  class="btn outline small"
+                  @click="setSinglePrice(ep)"
+                  :disabled="locked"
+                >
+                  单独改价</button
+                ><button
+                  v-if="ep.price_override"
+                  type="button"
+                  class="btn outline small"
+                  @click="bulk({ use_default: true }, [ep.id])"
+                  :disabled="locked"
+                >
+                  恢复默认
+                </button>
+              </td>
+            </tr>
+            <tr v-if="!rows.length">
+              <td colspan="4" class="empty-cell">
+                {{
+                  provider.endpoints.length
+                    ? "没有符合筛选条件的工具"
+                    : "尚未同步工具，请点击「测试连接并同步」"
+                }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </PaginatedTable>
     </div>
   </section>
 </template>

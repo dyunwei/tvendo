@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PaginatedTable from "./components/PaginatedTable.vue";
+import TableText from "./components/TableText.vue";
 import { computed, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
@@ -226,7 +228,8 @@ async function copy(v: string) {
     copied.value = true;
     copyTimer = setTimeout(() => (copied.value = false), 2000);
   } catch {
-    const message = "自动复制失败，请点击密钥文本全选后手动复制（手机可长按复制）。";
+    const message =
+      "自动复制失败，请点击密钥文本全选后手动复制（手机可长按复制）。";
     if (newKey.value) copyError.value = message;
     else error.value = "自动复制失败，请手动选择文本复制。";
   }
@@ -728,53 +731,56 @@ const statusLabel = (s: string) =>
             </button>
           </div>
           <div class="panel table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>密钥</th>
-                  <th>权限</th>
-                  <th>创建时间</th>
-                  <th>最后使用</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="key in visibleKeys" :key="key.id">
-                  <td class="text-dark">{{ key.label }}</td>
-                  <td class="mono">{{ key.prefix }}••••••••</td>
-                  <td>
-                    <span class="permission">tools:read</span>
-                    <span class="permission">runs:create</span>
-                  </td>
-                  <td>{{ date(key.created_at) }}</td>
-                  <td>{{ date(key.last_used) }}</td>
-                  <td>
-                    <button
-                      v-if="!key.revoked"
-                      class="danger-link"
-                      @click="revokeID = key.id"
-                    >
-                      撤销</button
-                    ><span v-else class="badge">已撤销</span>
-                  </td>
-                </tr>
-                <tr v-if="!visibleKeys.length">
-                  <td colspan="6" class="empty-cell">
-                    {{
-                      keyTab === "active"
-                        ? "还没有 API Key，创建一个开始接入。"
-                        : "暂无已撤销的密钥。"
-                    }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="table-footer">
-              共 {{ visibleKeys.length }} 个密钥<span
-                >完整密钥只在创建时显示一次</span
-              >
-            </div>
+            <PaginatedTable
+              :items="visibleKeys"
+              :reset-key="keyTab"
+              label="密钥分页"
+              note="完整密钥只在创建时显示一次"
+              v-slot="{ rows }"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>密钥</th>
+                    <th>权限</th>
+                    <th>创建时间</th>
+                    <th>最后使用</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="key in rows" :key="key.id">
+                    <td class="text-dark"><TableText :text="key.label" /></td>
+                    <td class="mono">{{ key.prefix }}••••••••</td>
+                    <td>
+                      <span class="permission">tools:read</span>
+                      <span class="permission">runs:create</span>
+                    </td>
+                    <td>{{ date(key.created_at) }}</td>
+                    <td>{{ date(key.last_used) }}</td>
+                    <td>
+                      <button
+                        v-if="!key.revoked"
+                        class="danger-link"
+                        @click="revokeID = key.id"
+                      >
+                        撤销</button
+                      ><span v-else class="badge">已撤销</span>
+                    </td>
+                  </tr>
+                  <tr v-if="!visibleKeys.length">
+                    <td colspan="6" class="empty-cell">
+                      {{
+                        keyTab === "active"
+                          ? "还没有 API Key，创建一个开始接入。"
+                          : "暂无已撤销的密钥。"
+                      }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </PaginatedTable>
           </div>
           <div class="tip">
             <ShieldCheck
@@ -927,57 +933,59 @@ const statusLabel = (s: string) =>
             </button>
           </div>
           <div v-if="visibleUsage.length" class="panel table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>调用编号</th>
-                  <th>工具 / 接口</th>
-                  <th>Key 名称</th>
-                  <th v-if="session.user?.role === 'admin'">用户名</th>
-                  <th>状态</th>
-                  <th>费用</th>
-                  <th>耗时</th>
-                  <th>时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="run in visibleUsage" :key="run.id">
-                  <td class="mono">#{{ run.id }}</td>
-                  <td>
-                    <strong class="text-dark">{{ run.tool_name }}</strong><small
-                      class="cell-sub mono"
-                      >{{ run.endpoint }}</small
-                    >
-                  </td>
-                  <td>
-                    <span class="usage-name" :title="run.key_label || undefined">{{
-                      run.key_label || "—"
-                    }}</span>
-                  </td>
-                  <td v-if="session.user?.role === 'admin'">
-                    <span class="usage-name" :title="run.user_name">{{
-                      run.user_name || "—"
-                    }}</span>
-                  </td>
-                  <td>
-                    <span class="status" :class="run.status"
-                      ><i />{{ statusLabel(run.status) }}</span
-                    >
-                  </td>
-                  <td>
-                    {{ run.status === "failed" ? money(0) : money(run.cost)
-                    }}<small v-if="run.status === 'running'" class="cell-sub"
-                      >预留金额</small
-                    >
-                  </td>
-                  <td>{{ run.duration_ms }} ms</td>
-                  <td>{{ date(run.created_at) }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="table-footer">
-              显示最近 200 次调用中的 {{ visibleUsage.length }} 条
-            </div>
+            <PaginatedTable
+              :items="visibleUsage"
+              :reset-key="usageTab"
+              label="用量记录分页"
+              note="最近 200 次调用"
+              v-slot="{ rows }"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>调用编号</th>
+                    <th>工具 / 接口</th>
+                    <th>Key 名称</th>
+                    <th v-if="session.user?.role === 'admin'">用户名</th>
+                    <th>状态</th>
+                    <th>费用</th>
+                    <th>耗时</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="run in rows" :key="run.id">
+                    <td class="mono">#{{ run.id }}</td>
+                    <td>
+                      <strong class="text-dark"
+                        ><TableText :text="run.tool_name" /></strong
+                      ><small class="cell-sub mono"
+                        ><TableText :text="run.endpoint"
+                      /></small>
+                    </td>
+                    <td>
+                      <TableText :text="run.key_label || '—'" />
+                    </td>
+                    <td v-if="session.user?.role === 'admin'">
+                      <TableText :text="run.user_name || '—'" />
+                    </td>
+                    <td>
+                      <span class="status" :class="run.status"
+                        ><i />{{ statusLabel(run.status) }}</span
+                      >
+                    </td>
+                    <td>
+                      {{ run.status === "failed" ? money(0) : money(run.cost)
+                      }}<small v-if="run.status === 'running'" class="cell-sub"
+                        >预留金额</small
+                      >
+                    </td>
+                    <td>{{ run.duration_ms }} ms</td>
+                    <td>{{ date(run.created_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </PaginatedTable>
           </div>
           <div v-else-if="!loading" class="panel empty-state">
             <History :size="42" />
@@ -1032,27 +1040,32 @@ const statusLabel = (s: string) =>
             v-if="transactions.some((t) => t.kind === 'topup')"
             class="panel table-wrap"
           >
-            <table>
-              <thead>
-                <tr>
-                  <th>流水号</th>
-                  <th>入账金额</th>
-                  <th>备注</th>
-                  <th>时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="t in transactions.filter((x) => x.kind === 'topup')"
-                  :key="t.id"
-                >
-                  <td>#{{ t.id }}</td>
-                  <td class="positive">+{{ money(t.amount) }}</td>
-                  <td>{{ t.note || "管理员充值" }}</td>
-                  <td>{{ date(t.created_at) }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <PaginatedTable
+              :items="transactions.filter((x) => x.kind === 'topup')"
+              :reset-key="page"
+              label="充值记录分页"
+              note="最近 200 条账目中的充值"
+              v-slot="{ rows }"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>流水号</th>
+                    <th>入账金额</th>
+                    <th>备注</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="t in rows" :key="t.id">
+                    <td>#{{ t.id }}</td>
+                    <td class="positive">+{{ money(t.amount) }}</td>
+                    <td><TableText :text="t.note || '管理员充值'" /></td>
+                    <td>{{ date(t.created_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </PaginatedTable>
           </div>
           <div v-else class="panel empty-state compact">
             <Receipt :size="38" />
@@ -1069,27 +1082,32 @@ const statusLabel = (s: string) =>
             v-if="transactions.some((t) => t.kind === 'usage')"
             class="panel table-wrap"
           >
-            <table>
-              <thead>
-                <tr>
-                  <th>流水号</th>
-                  <th>消费金额</th>
-                  <th>关联调用</th>
-                  <th>时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="t in transactions.filter((x) => x.kind === 'usage')"
-                  :key="t.id"
-                >
-                  <td>#{{ t.id }}</td>
-                  <td>{{ money(t.amount) }}</td>
-                  <td>{{ t.note }}</td>
-                  <td>{{ date(t.created_at) }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <PaginatedTable
+              :items="transactions.filter((x) => x.kind === 'usage')"
+              :reset-key="page"
+              label="消费记录分页"
+              note="最近 200 条账目中的消费"
+              v-slot="{ rows }"
+            >
+              <table>
+                <thead>
+                  <tr>
+                    <th>流水号</th>
+                    <th>消费金额</th>
+                    <th>关联调用</th>
+                    <th>时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="t in rows" :key="t.id">
+                    <td>#{{ t.id }}</td>
+                    <td>{{ money(t.amount) }}</td>
+                    <td><TableText :text="t.note" /></td>
+                    <td>{{ date(t.created_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </PaginatedTable>
           </div>
           <div v-else class="panel empty-state compact">
             <History :size="38" />
@@ -1160,8 +1178,14 @@ const statusLabel = (s: string) =>
             @focus="($event.target as HTMLTextAreaElement).select()"
             @click="($event.target as HTMLTextAreaElement).select()"
           />
-          <p v-if="copyError" class="alert error" role="alert">{{ copyError }}</p>
-          <button class="btn primary full" aria-live="polite" @click="copy(newKey)">
+          <p v-if="copyError" class="alert error" role="alert">
+            {{ copyError }}
+          </p>
+          <button
+            class="btn primary full"
+            aria-live="polite"
+            @click="copy(newKey)"
+          >
             <Check v-if="copied" :size="16" /><Copy v-else :size="16" />{{
               copied ? "已复制" : "复制密钥"
             }}</button

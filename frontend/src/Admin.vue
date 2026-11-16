@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PaginatedTable from "./components/PaginatedTable.vue";
+import TableText from "./components/TableText.vue";
 import { ref, computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import {
@@ -289,96 +291,106 @@ function downloadExample() {
         />
       </div>
       <div class="panel table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>用户</th>
-              <th>角色</th>
-              <th>余额</th>
-              <th>注册时间</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in shownUsers" :key="u.id">
-              <td>
-                <strong class="text-dark">{{ u.name }}</strong><small
-                  class="cell-sub"
-                  >{{ u.email }}</small
-                >
-              </td>
-              <td>
-                <span
-                  class="badge"
-                  :class="{ 'blue-badge': u.role === 'admin' }"
-                  >{{ u.role === "admin" ? "管理员" : "用户" }}</span
-                >
-              </td>
-              <td class="text-dark mono">{{ money(u.balance) }}</td>
-              <td>{{ date(u.created_at) }}</td>
-              <td>
-                <button
-                  class="btn outline small"
-                  @click="
-                    topupUser = u;
-                    amount = 10;
-                    note = '';
-                  "
-                >
-                  <Plus :size="14" />充值
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!shownUsers.length">
-              <td colspan="5" class="empty-cell">未找到用户</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="table-footer">
-          显示最近 1000 位用户中的 {{ shownUsers.length }} 位<span
-            >充值金额以元计</span
-          >
-        </div>
+        <PaginatedTable
+          :items="shownUsers"
+          :reset-key="search"
+          label="用户分页"
+          note="最近 1000 位用户 · 充值金额以元计"
+          v-slot="{ rows }"
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>用户</th>
+                <th>角色</th>
+                <th>余额</th>
+                <th>注册时间</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in rows" :key="u.id">
+                <td>
+                  <strong class="text-dark"><TableText :text="u.name" /></strong
+                  ><small class="cell-sub"><TableText :text="u.email" /></small>
+                </td>
+                <td>
+                  <span
+                    class="badge"
+                    :class="{ 'blue-badge': u.role === 'admin' }"
+                    >{{ u.role === "admin" ? "管理员" : "用户" }}</span
+                  >
+                </td>
+                <td class="text-dark mono">{{ money(u.balance) }}</td>
+                <td>{{ date(u.created_at) }}</td>
+                <td>
+                  <button
+                    class="btn outline small"
+                    @click="
+                      topupUser = u;
+                      amount = 10;
+                      note = '';
+                    "
+                  >
+                    <Plus :size="14" />充值
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!shownUsers.length">
+                <td colspan="5" class="empty-cell">未找到用户</td>
+              </tr>
+            </tbody>
+          </table>
+        </PaginatedTable>
       </div></template
     >
     <template v-else-if="section === 'audit'"
       ><div class="panel table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>编号</th>
-              <th>操作</th>
-              <th>对象 ID</th>
-              <th>操作人</th>
-              <th>时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in audit" :key="row.id">
-              <td>#{{ row.id }}</td>
-              <td>
-                {{
-                  row.action === "save_tool"
-                    ? "保存工具配置"
-                    : row.action === "topup"
-                      ? "充值入账"
-                      : row.action === "sync_mcp"
-                        ? "同步 MCP 工具"
-                        : row.action === "bulk_mcp"
-                          ? "批量更新 MCP 工具"
-                          : row.action
-                }}
-              </td>
-              <td>{{ row.target_id }}</td>
-              <td>{{ row.actor }}</td>
-              <td>{{ date(row.created_at) }}</td>
-            </tr>
-            <tr v-if="!audit.length">
-              <td colspan="5" class="empty-cell">暂无管理员操作记录</td>
-            </tr>
-          </tbody>
-        </table>
-        <div class="table-footer">最近 200 条操作</div>
+        <PaginatedTable
+          :items="audit"
+          :reset-key="section"
+          label="审计记录分页"
+          note="最近 200 条操作"
+          v-slot="{ rows }"
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>编号</th>
+                <th>操作</th>
+                <th>对象 ID</th>
+                <th>操作人</th>
+                <th>时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in rows" :key="row.id">
+                <td>#{{ row.id }}</td>
+                <td>
+                  <TableText
+                    :text="
+                      row.action === 'save_tool'
+                        ? '保存工具配置'
+                        : row.action === 'topup'
+                          ? '充值入账'
+                          : row.action === 'sync_mcp'
+                            ? '同步 MCP 工具'
+                            : row.action === 'bulk_mcp'
+                              ? '批量更新 MCP 工具'
+                              : row.action
+                    "
+                  />
+                </td>
+                <td>{{ row.target_id }}</td>
+                <td><TableText :text="row.actor" /></td>
+                <td>{{ date(row.created_at) }}</td>
+              </tr>
+              <tr v-if="!audit.length">
+                <td colspan="5" class="empty-cell">暂无管理员操作记录</td>
+              </tr>
+            </tbody>
+          </table>
+        </PaginatedTable>
       </div></template
     >
     <template v-else
@@ -413,50 +425,58 @@ function downloadExample() {
         </button>
       </div>
       <div class="panel table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>工具 / 标识</th>
-              <th>分类</th>
-              <th>接口</th>
-              <th>鉴权</th>
-              <th>状态</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="t in shownTools" :key="t.id">
-              <td>
-                <div class="admin-tool-name">
-                  <span class="tool-icon">{{ t.icon }}</span><span
-                    ><strong>{{ t.name }}</strong
-                    ><small class="cell-sub mono">{{ t.slug }}</small></span
+        <PaginatedTable
+          :items="shownTools"
+          :reset-key="search"
+          label="工具配置分页"
+          v-slot="{ rows }"
+        >
+          <table>
+            <thead>
+              <tr>
+                <th>工具 / 标识</th>
+                <th>分类</th>
+                <th>接口</th>
+                <th>鉴权</th>
+                <th>状态</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in rows" :key="t.id">
+                <td>
+                  <div class="admin-tool-name">
+                    <span class="tool-icon">{{ t.icon }}</span><span
+                      ><strong><TableText :text="t.name" /></strong
+                      ><small class="cell-sub mono"
+                        ><TableText :text="t.slug" /></small
+                    ></span>
+                  </div>
+                </td>
+                <td><TableText :text="t.category" /></td>
+                <td>{{ t.endpoints.length }}</td>
+                <td>
+                  <span class="badge">{{
+                    t.has_secret ? "密钥已配置" : "未配置密钥"
+                  }}</span>
+                </td>
+                <td>
+                  <span class="status" :class="t.enabled ? 'success' : 'paused'"
+                    ><i />{{ t.enabled ? "已启用" : "未启用" }}</span
                   >
-                </div>
-              </td>
-              <td>{{ t.category }}</td>
-              <td>{{ t.endpoints.length }}</td>
-              <td>
-                <span class="badge">{{
-                  t.has_secret ? "密钥已配置" : "未配置密钥"
-                }}</span>
-              </td>
-              <td>
-                <span class="status" :class="t.enabled ? 'success' : 'paused'"
-                  ><i />{{ t.enabled ? "已启用" : "未启用" }}</span
-                >
-              </td>
-              <td>
-                <button class="btn outline small" @click="edit(t)">
-                  <Settings2 :size="14" />配置
-                </button>
-              </td>
-            </tr>
-            <tr v-if="!shownTools.length">
-              <td colspan="6" class="empty-cell">没有匹配的工具配置</td>
-            </tr>
-          </tbody>
-        </table>
+                </td>
+                <td>
+                  <button class="btn outline small" @click="edit(t)">
+                    <Settings2 :size="14" />配置
+                  </button>
+                </td>
+              </tr>
+              <tr v-if="!shownTools.length">
+                <td colspan="6" class="empty-cell">没有匹配的工具配置</td>
+              </tr>
+            </tbody>
+          </table>
+        </PaginatedTable>
       </div>
       <div class="tip">
         <ShieldCheck
