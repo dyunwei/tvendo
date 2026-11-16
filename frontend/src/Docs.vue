@@ -105,7 +105,7 @@ const items = [
         <p class="doc-lead">
           把这条指令发给能读取网页并发送 HTTP 请求的 Agent。
         </p>
-        <pre>安装 {{ base }}/SKILL.md 为用户级技能，并配置验证 Tvendo 接入。</pre>
+        <pre>安装 {{ base }}/SKILL.md 为用户级技能，配置并验证接入。</pre>
         <h2>接入流程</h2>
         <p>
           Skill 描述了发现接口与执行调用的步骤。支持技能安装的 Agent 会按宿主规则

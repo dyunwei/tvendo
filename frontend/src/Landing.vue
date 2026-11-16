@@ -18,7 +18,7 @@ import {
 const copied = ref(false),
   open = ref(-1);
 const command = computed(
-  () => `安装 ${window.location.origin}/SKILL.md 为用户级技能，并配置验证 Tvendo 接入。`,
+  () => `安装 ${window.location.origin}/SKILL.md 为用户级技能，配置并验证接入。`,
 );
 async function copy() {
   try {

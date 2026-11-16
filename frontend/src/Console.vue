@@ -128,7 +128,7 @@ const visibleUsage = computed(() =>
     : usage.value,
 );
 const base = window.location.origin,
-  command = `安装 ${base}/SKILL.md 为用户级技能，并配置验证 Tvendo 接入。`;
+  command = `安装 ${base}/SKILL.md 为用户级技能，配置并验证接入。`;
 const invocation = ref<Endpoint | null>(null),
   params = ref("{}"),
   invokeResult = ref(""),
