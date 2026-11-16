@@ -58,7 +58,7 @@ docker compose up -d
 把下面这句话发给 Agent：
 
 ```text
-请读取 https://<你的服务地址>/SKILL.md，帮我配置 Tvendo 工具接入。
+安装 https://<你的服务地址>/SKILL.md 为用户级技能，并配置验证 Tvendo 接入。
 ```
 
 也可直接安装 CLI，在本机配置 `TVENDO_SERVER` 和 `TVENDO_API_KEY` 后使用：
