@@ -322,7 +322,8 @@ a svg {
   text-align: left;
   border: 1px solid #383a35;
   border-radius: 9px;
-  max-width: 680px;
+  width: fit-content;
+  max-width: 100%;
   margin: auto;
   padding: 14px 16px;
   box-shadow: 0 17px 32px #161a1719;
