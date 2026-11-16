@@ -932,6 +932,8 @@ const statusLabel = (s: string) =>
                 <tr>
                   <th>调用编号</th>
                   <th>工具 / 接口</th>
+                  <th>Key 名称</th>
+                  <th v-if="session.user?.role === 'admin'">用户名</th>
                   <th>状态</th>
                   <th>费用</th>
                   <th>耗时</th>
@@ -946,6 +948,16 @@ const statusLabel = (s: string) =>
                       class="cell-sub mono"
                       >{{ run.endpoint }}</small
                     >
+                  </td>
+                  <td>
+                    <span class="usage-name" :title="run.key_label || undefined">{{
+                      run.key_label || "—"
+                    }}</span>
+                  </td>
+                  <td v-if="session.user?.role === 'admin'">
+                    <span class="usage-name" :title="run.user_name">{{
+                      run.user_name || "—"
+                    }}</span>
                   </td>
                   <td>
                     <span class="status" :class="run.status"

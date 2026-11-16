@@ -336,6 +336,64 @@ func TestIntegrationBilling(t *testing.T) {
 	require(code, 200, out)
 	code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", apiKey)
 	require(code, 401, out)
+	// Usage keeps the key label after revocation, while names and other users'
+	// records are only available to administrators.
+	var adminID, adminRunID int64
+	if err := db.QueryRow(ctx, `SELECT id FROM users WHERE role='admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO usage(user_id,tool_name,endpoint,cost,status) VALUES($1,'Admin test','/ok',0,'success') RETURNING id`, adminID).Scan(&adminRunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		cookie *http.Cookie
+		admin  bool
+	}{
+		{"user", userCookie, false},
+		{"admin", adminCookie, true},
+	} {
+		t.Run("usage visibility/"+tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/api/usage", nil)
+			r.AddCookie(tc.cookie)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			var records []map[string]any
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &records) != nil {
+				t.Fatalf("usage response: %d %s", w.Code, w.Body.String())
+			}
+			var foundKey, foundConsole, foundAdmin bool
+			for _, record := range records {
+				_, hasName := record["user_name"]
+				if hasName != tc.admin {
+					t.Fatalf("unexpected username visibility: %v", record)
+				}
+				if !tc.admin && record["user_id"] != float64(userID) {
+					t.Fatalf("another user's usage leaked: %v", record)
+				}
+				switch record["id"] {
+				case float64(failedID):
+					foundKey = true
+					if record["key_label"] != "agent" || record["key_id"] != keyID {
+						t.Fatalf("revoked key attribution missing: %v", record)
+					}
+					if tc.admin && record["user_name"] != "Test User" {
+						t.Fatalf("incorrect username: %v", record)
+					}
+				case float64(consoleRunID):
+					foundConsole = true
+					if record["key_label"] != "" || record["key_id"] != nil {
+						t.Fatalf("console call attributed to a key: %v", record)
+					}
+				case float64(adminRunID):
+					foundAdmin = true
+				}
+			}
+			if !foundKey || !foundConsole || foundAdmin != tc.admin {
+				t.Fatalf("unexpected records: key=%v console=%v admin=%v", foundKey, foundConsole, foundAdmin)
+			}
+		})
+	}
 	_, e = db.Exec(ctx, `INSERT INTO usage(user_id,tool_name,endpoint,cost,created_at) VALUES($1,'Test','/ok',100000,'2000-01-01')`, userID)
 	if e != nil {
 		t.Fatal(e)

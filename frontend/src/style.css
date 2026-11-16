@@ -2230,6 +2230,13 @@ td:last-child {
   margin-top: 6px;
   color: #afafaf;
 }
+.usage-name {
+  display: block;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .status {
   display: inline-flex;
   align-items: center;

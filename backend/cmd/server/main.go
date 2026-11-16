@@ -41,6 +41,8 @@ type App struct {
 	client    *http.Client
 }
 type User struct {
+	KeyID        int64  `json:"-"`
+	KeyLabel     string `json:"-"`
 	Currency     string `json:"currency"`
 	ID           int64  `json:"id"`
 	Email        string `json:"email"`
@@ -621,7 +623,8 @@ func (a *App) apiUser(w http.ResponseWriter, r *http.Request) (User, bool) {
 		return u, false
 	}
 	var id, keyID int64
-	e := a.db.QueryRow(r.Context(), `SELECT user_id,id FROM api_keys WHERE hash=$1 AND revoked=false`, hash(token)).Scan(&id, &keyID)
+	var keyLabel string
+	e := a.db.QueryRow(r.Context(), `SELECT user_id,id,label FROM api_keys WHERE hash=$1 AND revoked=false`, hash(token)).Scan(&id, &keyID, &keyLabel)
 	if e != nil {
 		fail(w, 401, "API Key 无效或已撤销")
 		return u, false
@@ -632,6 +635,7 @@ func (a *App) apiUser(w http.ResponseWriter, r *http.Request) (User, bool) {
 		return u, false
 	}
 	_, _ = a.db.Exec(r.Context(), `UPDATE api_keys SET last_used=now() WHERE id=$1`, keyID)
+	u.KeyID, u.KeyLabel = keyID, keyLabel
 	return u, true
 }
 func (a *App) run(w http.ResponseWriter, r *http.Request) {
@@ -788,7 +792,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	var runID int64
-	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id) VALUES($1,$2,$3,$4,$5) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID).Scan(&runID)
+	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id,key_id,key_label) VALUES($1,$2,$3,$4,$5,NULLIF($6::bigint,0),$7) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID, u.KeyID, u.KeyLabel).Scan(&runID)
 	if e != nil {
 		fail(w, 500, "创建调用记录失败")
 		return
@@ -933,6 +937,10 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/budgets", a.withUser(false, a.budget))
 	m.HandleFunc("PUT /api/budgets", a.withUser(false, a.budget))
 	m.HandleFunc("GET /api/usage", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
+		if u.Role == "admin" {
+			a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT usage.*,users.name AS user_name FROM usage JOIN users ON users.id=usage.user_id ORDER BY usage.id DESC LIMIT 200) x`)
+			return
+		}
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT * FROM usage WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
 	}))
 	m.HandleFunc("GET /api/transactions", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
