@@ -100,7 +100,7 @@ func TestIntegrationBilling(t *testing.T) {
 			t.Error("upstream secret missing")
 		}
 		if r.URL.Path == "/fail" {
-			w.WriteHeader(500)
+			writeJSON(w, 500, map[string]any{"error": map[string]string{"message": "quota exceeded for upstream-secret"}})
 			return
 		}
 		time.Sleep(15 * time.Millisecond)
@@ -237,11 +237,18 @@ func TestIntegrationBilling(t *testing.T) {
 	if out["settlement"] != "refunded" {
 		t.Fatal("refund state missing")
 	}
+	var failureCode, failureMessage string
+	if err := db.QueryRow(ctx, `SELECT error_code,error_message FROM usage WHERE id=$1`, failedID).Scan(&failureCode, &failureMessage); err != nil || failureCode != "UPSTREAM_HTTP_ERROR" || !strings.Contains(failureMessage, "quota exceeded") || strings.Contains(failureMessage, "upstream-secret") {
+		t.Fatalf("failed diagnostic not persisted safely: %q %q %v", failureCode, failureMessage, err)
+	}
 	code, out, _ = request("GET", "/v1/runs?request_id="+requestID, nil, nil, "", apiKey)
 	require(code, 200, out)
 	records := out["data"].(map[string]any)["items"].([]any)
 	if len(records) != 1 || records[0].(map[string]any)["currency"] != "CNY" || records[0].(map[string]any)["status"] != "failed" {
 		t.Fatal("request correlation failed")
+	}
+	if record := records[0].(map[string]any); record["error_code"] != failureCode || record["error_message"] != failureMessage {
+		t.Fatalf("run diagnostics missing: %v", record)
 	}
 	code, out, _ = request("GET", fmt.Sprintf("/v1/runs/%d", failedID), nil, nil, "", apiKey)
 	require(code, 200, out)
@@ -487,6 +494,9 @@ func TestIntegrationBilling(t *testing.T) {
 	require(code, 502, out)
 	if out["settlement"] != "refunded" || !strings.Contains(out["error"].(string), "MCP 工具执行失败: ok") {
 		t.Fatalf("missing MCP error detail/refund: %v", out)
+	}
+	if err := db.QueryRow(ctx, `SELECT error_code,error_message FROM usage WHERE id=$1`, int64(out["id"].(float64))).Scan(&failureCode, &failureMessage); err != nil || failureCode != "MCP_ERROR" || !strings.Contains(failureMessage, "MCP 工具执行失败: ok") {
+		t.Fatalf("MCP diagnostic not persisted: %q %q %v", failureCode, failureMessage, err)
 	}
 	after, _ := a.user(ctx, userID)
 	if after.Balance != before.Balance {

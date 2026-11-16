@@ -160,7 +160,7 @@ func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, "请求标识无效")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
+	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,error_code,error_message,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
 	if err != nil {
 		fail(w, 500, "无法读取调用记录")
 		return

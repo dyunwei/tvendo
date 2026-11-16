@@ -85,6 +85,7 @@ const dailyInput = ref(3),
   revokeID = ref<number | null>(null),
   copied = ref(false),
   agent = ref("通用 Agent");
+const usageDetail = ref<any>(null);
 const copyError = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 function resetCopy() {
@@ -951,6 +952,7 @@ const statusLabel = (s: string) =>
                     <th>费用</th>
                     <th>耗时</th>
                     <th>时间</th>
+                    <th>详情</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -982,6 +984,15 @@ const statusLabel = (s: string) =>
                     </td>
                     <td>{{ run.duration_ms }} ms</td>
                     <td>{{ date(run.created_at) }}</td>
+                    <td>
+                      <button
+                        type="button"
+                        class="usage-detail-button"
+                        @click="usageDetail = run"
+                      >
+                        查看详情
+                      </button>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -1126,7 +1137,9 @@ const statusLabel = (s: string) =>
   </div>
   <Teleport to="body"
     ><div
-      v-if="creating || newKey || revokeID !== null || invocation"
+      v-if="
+        creating || newKey || revokeID !== null || invocation || usageDetail
+      "
       class="modal-backdrop"
     >
       <section
@@ -1134,7 +1147,7 @@ const statusLabel = (s: string) =>
         :class="{ wide: invocation }"
         role="dialog"
         aria-modal="true"
-        aria-label="密钥或接口操作"
+        :aria-label="usageDetail ? '调用详情' : '密钥或接口操作'"
       >
         <button
           class="modal-close icon-btn"
@@ -1144,12 +1157,44 @@ const statusLabel = (s: string) =>
             newKey = '';
             revokeID = null;
             invocation = null;
+            usageDetail = null;
           "
           aria-label="关闭"
         >
           <X :size="20" />
         </button>
-        <form v-if="creating" @submit.prevent="createKey">
+        <template v-if="usageDetail">
+          <h2>调用详情 #{{ usageDetail.id }}</h2>
+          <dl class="usage-detail">
+            <dt>工具 / 接口</dt>
+            <dd>{{ usageDetail.tool_name }} / {{ usageDetail.endpoint }}</dd>
+            <dt>状态</dt>
+            <dd>{{ statusLabel(usageDetail.status) }}</dd>
+            <dt>HTTP 状态码</dt>
+            <dd>{{ usageDetail.http_status || "未取得响应状态码" }}</dd>
+            <dt>请求 ID</dt>
+            <dd class="mono">{{ usageDetail.request_id || "—" }}</dd>
+            <dt>耗时</dt>
+            <dd>{{ usageDetail.duration_ms }} ms</dd>
+            <dt>时间</dt>
+            <dd>{{ date(usageDetail.created_at) }}</dd>
+            <template v-if="usageDetail.status === 'failed'">
+              <dt>错误类型</dt>
+              <dd class="mono">{{ usageDetail.error_code || "—" }}</dd>
+              <dt>失败原因</dt>
+              <dd>
+                {{
+                  usageDetail.error_message ||
+                  "此记录未保存失败原因（历史记录无法补录）。"
+                }}
+              </dd>
+            </template>
+          </dl>
+          <button class="btn outline full" @click="usageDetail = null">
+            关闭
+          </button>
+        </template>
+        <form v-else-if="creating" @submit.prevent="createKey">
           <span class="modal-icon"><KeyRound /></span>
           <h2>创建 API Key</h2>
           <p>给密钥起一个容易识别的名字。</p>

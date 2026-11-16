@@ -813,7 +813,10 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		if callErr == nil {
 			status = 200
 		} else {
-			status = 502
+			var upstreamStatus *mcpHTTPStatus
+			if errors.As(callErr, &upstreamStatus) {
+				status = upstreamStatus.code
+			}
 		}
 	} else {
 		var response *http.Response
@@ -823,25 +826,25 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 			body, callErr = io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
 			response.Body.Close()
 			if len(body) > 8<<20 {
-				callErr = errors.New("response too large")
+				callErr = errResponseTooLarge
 			}
 		}
 	}
 	success := callErr == nil && status >= 200 && status < 300
+	failure := callFailure{}
+	if !success {
+		failure = a.describeCallFailure(provider, callErr, status, body)
+		log.Printf("upstream failed run_id=%d request_id=%q tool=%q endpoint=%q http_status=%d error_code=%s detail=%q", runID, requestID, name, ep.Path, status, failure.Code, failure.Message)
+	}
 	finishCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds()); e != nil {
+	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds(), failure); e != nil {
 		log.Printf("settle run %d: %v", runID, e)
 		agentError(w, 503, "SETTLEMENT_UNKNOWN", "结算暂未完成，请查询调用记录，勿自动重试", "unknown", runID, requestID)
 		return
 	}
 	if !success {
-		message := fmt.Sprintf("上游调用失败（HTTP %d），预留余额已退回。调用编号：%d", status, runID)
-		if isMCP(provider) && callErr != nil {
-			detail := a.mcpCallDetail(provider, callErr)
-			log.Printf("MCP run %d request %s: %s", runID, requestID, detail)
-			message = fmt.Sprintf("上游 MCP 调用失败，预留余额已退回。调用编号：%d。详情：%s", runID, detail)
-		}
+		message := fmt.Sprintf("上游调用失败，预留余额已退回。调用编号：%d。详情：%s", runID, failure.Message)
 		agentError(w, 502, "UPSTREAM_FAILED", message, "refunded", runID, requestID)
 		return
 	}
@@ -851,7 +854,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	}
 	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result, "request_id": requestID, "currency": billing.Currency})
 }
-func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64) error {
+func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64, failure callFailure) error {
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -865,7 +868,7 @@ func (a *App) settle(ctx context.Context, runID, userID, cost int64, success boo
 	if success {
 		state = "success"
 	}
-	result, e := tx.Exec(ctx, `UPDATE usage SET status=$2,http_status=$3,duration_ms=$4 WHERE id=$1 AND status='running'`, runID, state, status, duration)
+	result, e := tx.Exec(ctx, `UPDATE usage SET status=$2,http_status=$3,duration_ms=$4,error_code=$5,error_message=$6 WHERE id=$1 AND status='running'`, runID, state, status, duration, failure.Code, failure.Message)
 	if e != nil {
 		return e
 	}
@@ -900,7 +903,7 @@ func (a *App) recoverRuns(ctx context.Context) {
 	}
 	rows.Close()
 	for _, p := range out {
-		if e := a.settle(ctx, p.id, p.user, p.cost, false, 0, 0); e != nil {
+		if e := a.settle(ctx, p.id, p.user, p.cost, false, 0, 0, callFailure{Code: "RUN_INTERRUPTED", Message: "调用长时间未完成，系统已回收预留余额；可能因服务重启或执行中断"}); e != nil {
 			log.Print(e)
 		}
 	}

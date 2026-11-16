@@ -4019,3 +4019,30 @@ td:last-child {
     padding: 7px 8px;
   }
 }
+
+.usage-detail {
+  margin: 24px 0;
+  font-size: 14px;
+}
+.usage-detail dt {
+  color: var(--text-secondary, #64748b);
+  margin-top: 16px;
+}
+.usage-detail dd {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.usage-detail-button {
+  padding: 3px 0;
+  color: #666666;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.usage-detail-button:hover {
+  color: #242424;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
