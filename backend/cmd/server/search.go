@@ -142,7 +142,10 @@ type catalogDocument struct {
 }
 
 func makeCatalogDocument(t Tool, ep Endpoint) catalogDocument {
-	description := strings.TrimSpace(ep.Description + " " + t.Description)
+	description := strings.TrimSpace(ep.Description)
+	if description == "" {
+		description = strings.TrimSpace(t.Description)
+	}
 	item := catalogItem{Currency: "CNY", Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: description, SearchDescription: ep.SearchDescription, Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: endpointExample(t, ep), Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
 	// Put endpoint-specific capability information first; provider prose is auxiliary.
 	text := strings.Join([]string{ep.Name, ep.SearchDescription, ep.Description, t.Name, t.Slug, ep.ID, t.Category, t.Description}, "\n")

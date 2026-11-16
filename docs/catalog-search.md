@@ -25,6 +25,8 @@ Docker 中运行 Tvendo 时，`localhost` 指向 Tvendo 自己的容器。应改
 
 ## 索引与元数据
 
+目录及工具详情返回的 `description` 优先使用端点自身描述，仅在端点描述为空时使用供应商描述，不拼接两者。供应商描述仍参与搜索索引。
+
 数据库迁移自动创建 `catalog_embeddings`，无需 pgvector。启动后后台批量补建向量，每 30 秒检查已启用的目录，只计算新增或文本变化的端点。向量持久化到 PostgreSQL，搜索请求不会计算整个目录。每批最多 16 条，后台请求最多等待 30 秒；查询整体语义阶段最多等待 3 秒。
 
 HTTP 端点可以在管理员接口 JSON 中设置 `search_description`；MCP 端点展开后可编辑“检索补充说明”。原始 `description` 保留，上游同步不会覆盖本地补充说明。接口管理 API 也支持：
@@ -55,6 +57,20 @@ HTTP 端点可以在管理员接口 JSON 中设置 `search_description`；MCP �
 空查询保留按 tool_ref 排序和原来的游标。非空查询按相关性排序，使用新的不透明游标并绑定规范化查询和候选顺序；必须原样传递。当索引更新或降级导致候选顺序变化时返回 400，要求从第一页重新搜索，避免跳过结果或重复结果。
 
 ## 验收
+
+### 排查误召回
+
+`search.indexed` 是参与语义比较的有效向量数，不代表相关结果数。使用现有数据库进行只读诊断，可输出每个端点的关键词分数、余弦相似度、是否超过阈值及最终排名（不更新目录或索引）：
+
+```bash
+cd backend
+TEST_CATALOG_DATABASE_URL="$DATABASE_URL" \
+TEST_EMBEDDING_URL="$SEARCH_EMBEDDING_URL" \
+TEST_CATALOG_QUERY='网页抓取' \
+go test ./cmd/server -run '^TestLiveCatalogSearchDiagnostics$' -count=1 -v
+```
+
+运行前需在当前 shell 导出服务使用的配置，包括模型、revision、阈值及可选 embedding 密钥，确保读取相同模型的缓存。若全部关键词分数为 0，结果顺序来自语义相似度排名；RRF 不会判断工具能力。若不相关工具的相似度高于正确工具，单纯提高阈值无法保留正确工具并排除该误召回。可先为英文长描述补充简洁的中文 `search_description`，等待增量索引更新，再对比真实需求的排序与误召回；仍不足时评估其他 embedding 模型或增加相关性重排。
 
 准备真实需求，标注可接受的端点及不可接受的替代工具。重点测 Recall@5、无合适工具时的误召回、热启动延迟和并发；分别对比纯关键词与混合搜索。
 

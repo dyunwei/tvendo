@@ -11,7 +11,59 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Opt-in, read-only diagnosis against an existing catalog. Never creates or updates data.
+func TestLiveCatalogSearchDiagnostics(t *testing.T) {
+	dbURL := os.Getenv("TEST_CATALOG_DATABASE_URL")
+	endpoint := os.Getenv("TEST_EMBEDDING_URL")
+	if dbURL == "" || endpoint == "" {
+		t.Skip("set TEST_CATALOG_DATABASE_URL and TEST_EMBEDDING_URL to diagnose an existing catalog")
+	}
+	t.Setenv("SEARCH_EMBEDDING_URL", endpoint)
+	s, err := newCatalogSearch()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatal("cannot connect to diagnostic database")
+	}
+	defer db.Close()
+	a := &App{db: db, search: s}
+	docs, err := a.catalogDocuments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached, err := a.catalogVectors(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := strings.ToLower(strings.Join(strings.Fields(env("TEST_CATALOG_QUERY", "网页抓取")), " "))
+	vectors, err := s.embed(ctx, []string{q}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range docs {
+		keyword, exact := keywordScore(d, q)
+		v, ok := cached[d.item.Ref]
+		if !ok || v.hash != d.hash {
+			t.Logf("%s (%s): keyword=%.0f exact=%t vector=missing_or_stale", d.item.Name, d.item.Ref, keyword, exact)
+			continue
+		}
+		similarity, valid := cosine(vectors[0], v.vector)
+		t.Logf("%s (%s): keyword=%.0f exact=%t cosine=%.6f valid=%t semantic_hit=%t", d.item.Name, d.item.Ref, keyword, exact, similarity, valid, valid && similarity >= s.minScore)
+	}
+	items, indexed, mismatch := rankCatalog(docs, q, vectors[0], cached, s.minScore)
+	t.Logf("query=%q threshold=%.4f indexed=%d total=%d dimension_mismatch=%t", q, s.minScore, indexed, len(docs), mismatch)
+	for i, item := range items {
+		t.Logf("rank=%d name=%s ref=%s", i+1, item.Name, item.Ref)
+	}
+}
 
 func TestEmbeddingProtocol(t *testing.T) {
 	for _, query := range []bool{true, false} {
@@ -171,8 +223,17 @@ func TestHybridRankingAndStaleVectors(t *testing.T) {
 
 func TestSearchMetadataAndMCPMerge(t *testing.T) {
 	ep := Endpoint{ID: "web", MCPName: "web", Name: "Web", Description: "Original English description", SearchDescription: "公开地址查询"}
-	provider := Tool{ID: 1, Endpoints: []Endpoint{ep}}
+	provider := Tool{ID: 1, Description: "配置示例，需核实上游 API 后启用。", Endpoints: []Endpoint{ep}}
 	before := makeCatalogDocument(provider, ep)
+	if before.item.Description != ep.Description {
+		t.Fatalf("catalog description includes provider prose: %q", before.item.Description)
+	}
+	if score, _ := keywordScore(before, "配置示例"); score == 0 {
+		t.Fatal("provider description not searchable")
+	}
+	if fallback := makeCatalogDocument(provider, Endpoint{ID: "empty", Description: " \n "}); fallback.item.Description != provider.Description {
+		t.Fatalf("missing provider description fallback: %q", fallback.item.Description)
+	}
 	if score, _ := keywordScore(before, "地址查询"); score == 0 {
 		t.Fatal("supplement not searchable")
 	}
