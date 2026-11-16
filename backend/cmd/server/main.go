@@ -314,6 +314,9 @@ func (a *App) listTools(w http.ResponseWriter, r *http.Request, admin bool) {
 		}
 		t.HasSecret = t.Secret != nil && *t.Secret != ""
 		t.Secret = nil
+		for i := range t.Endpoints {
+			t.Endpoints[i].Parameters = endpointExample(t, t.Endpoints[i])
+		}
 		if !admin {
 			visible := []Endpoint{}
 			for _, ep := range t.Endpoints {
@@ -829,7 +832,13 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	if !success {
-		agentError(w, 502, "UPSTREAM_FAILED", fmt.Sprintf("上游调用失败（HTTP %d），预留余额已退回。调用编号：%d", status, runID), "refunded", runID, requestID)
+		message := fmt.Sprintf("上游调用失败（HTTP %d），预留余额已退回。调用编号：%d", status, runID)
+		if isMCP(provider) && callErr != nil {
+			detail := a.mcpCallDetail(provider, callErr)
+			log.Printf("MCP run %d request %s: %s", runID, requestID, detail)
+			message = fmt.Sprintf("上游 MCP 调用失败，预留余额已退回。调用编号：%d。详情：%s", runID, detail)
+		}
+		agentError(w, 502, "UPSTREAM_FAILED", message, "refunded", runID, requestID)
 		return
 	}
 	var result any

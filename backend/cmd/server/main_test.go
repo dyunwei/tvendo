@@ -427,6 +427,9 @@ func TestIntegrationBilling(t *testing.T) {
 	before, _ := a.user(ctx, userID)
 	code, out, _ = request("POST", "/v1/run", remoteRun("fail"), nil, "", mcpKey)
 	require(code, 502, out)
+	if out["settlement"] != "refunded" || !strings.Contains(out["error"].(string), "MCP 工具执行失败: ok") {
+		t.Fatalf("missing MCP error detail/refund: %v", out)
+	}
 	after, _ := a.user(ctx, userID)
 	if after.Balance != before.Balance {
 		t.Fatal("MCP isError did not refund")

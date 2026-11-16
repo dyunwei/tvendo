@@ -86,7 +86,7 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 			if ep.Disabled || ep.Missing {
 				continue
 			}
-			item := catalogItem{Currency: billing.Currency, Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: strings.TrimSpace(ep.Description + " " + t.Description), Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: ep.Parameters, Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
+			item := catalogItem{Currency: billing.Currency, Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: strings.TrimSpace(ep.Description + " " + t.Description), Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: endpointExample(t, ep), Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
 			if ref := r.PathValue("ref"); ref != "" {
 				if ref == item.Ref {
 					agentOK(w, item)

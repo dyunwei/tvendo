@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -173,38 +175,110 @@ func (a *App) discoverMCP(ctx context.Context, t Tool) ([]Endpoint, error) {
 	}
 	return nil, errors.New("MCP pagination exceeds 100 pages")
 }
-func schemaExample(s map[string]any) json.RawMessage {
-	props, _ := s["properties"].(map[string]any)
-	out := map[string]any{}
-	for key, value := range props {
-		p, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		if v, ok := p["default"]; ok {
-			out[key] = v
-			continue
-		}
-		if v, ok := p["enum"].([]any); ok && len(v) > 0 {
-			out[key] = v[0]
-			continue
-		}
-		switch p["type"] {
-		case "string":
-			out[key] = ""
-		case "integer", "number":
-			out[key] = 0
-		case "boolean":
-			out[key] = false
-		case "array":
-			out[key] = []any{}
-		case "object":
-			out[key] = map[string]any{}
+
+// MCP examples are derived on read as well as sync, so existing catalogs do not
+// need to be reimported after an example-generation fix.
+func endpointExample(t Tool, ep Endpoint) json.RawMessage {
+	if isMCP(t) {
+		var shape map[string]any
+		if json.Unmarshal(ep.InputSchema, &shape) == nil && shape != nil {
+			return schemaExample(shape)
 		}
 	}
-	b, _ := json.Marshal(out)
+	return ep.Parameters
+}
+
+func schemaExample(s map[string]any) json.RawMessage {
+	b, _ := json.Marshal(schemaExampleValue(s, 0))
 	return b
 }
+
+func schemaExampleValue(s map[string]any, depth int) any {
+	for _, key := range []string{"example", "default", "const"} {
+		if v, ok := s[key]; ok {
+			return v
+		}
+	}
+	for _, key := range []string{"examples", "enum"} {
+		if values, ok := s[key].([]any); ok && len(values) > 0 {
+			return values[0]
+		}
+	}
+	switch s["type"] {
+	case "object":
+		out := map[string]any{}
+		if depth >= 16 {
+			return out
+		}
+		props, _ := s["properties"].(map[string]any)
+		required, _ := s["required"].([]any)
+		// Optional fields must be omitted: empty/zero values may be invalid or
+		// activate mutually exclusive filters on the upstream.
+		for _, field := range required {
+			key, ok := field.(string)
+			if !ok {
+				continue
+			}
+			if p, ok := props[key].(map[string]any); ok {
+				out[key] = schemaExampleValue(p, depth+1)
+			}
+		}
+		return out
+	case "string":
+		return ""
+	case "integer", "number":
+		if minimum, ok := s["minimum"]; ok {
+			return minimum
+		}
+		return 0
+	case "boolean":
+		return false
+	case "array":
+		return []any{}
+	}
+	return nil
+}
+
+// Only tool-call errors are suitable for user-facing diagnostics. Connection
+// errors may contain credential-bearing URLs and use a generic message instead.
+type mcpCallError struct{ detail string }
+
+func (e *mcpCallError) Error() string { return e.detail }
+
+func (a *App) mcpCallDetail(t Tool, err error) string {
+	var call *mcpCallError
+	if !errors.As(err, &call) {
+		var status *mcpHTTPStatus
+		if errors.As(err, &status) || errors.Is(err, context.DeadlineExceeded) {
+			return mcpProblem(err)
+		}
+		return "MCP 连接或通信失败，请检查上游地址、鉴权和传输类型"
+	}
+	detail := call.detail
+	if t.Secret != nil && *t.Secret != "" {
+		key, decryptErr := a.decrypt(*t.Secret)
+		if decryptErr != nil {
+			return "MCP 工具调用失败"
+		}
+		if key != "" {
+			detail = strings.ReplaceAll(detail, key, "[REDACTED]")
+		}
+	}
+	if t.BaseURL != "" {
+		detail = strings.ReplaceAll(detail, t.BaseURL, "[upstream]")
+	}
+	detail = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return ' '
+		}
+		return r
+	}, detail)
+	if utf8.RuneCountInString(detail) > 2000 {
+		detail = string([]rune(detail)[:2000]) + "…"
+	}
+	return detail
+}
+
 func sameSchema(a, b json.RawMessage) bool {
 	var x, y any
 	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
@@ -399,10 +473,16 @@ func (a *App) callMCP(ctx context.Context, t Tool, ep Endpoint, args map[string]
 	defer session.Close()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: ep.MCPName, Arguments: args})
 	if err != nil {
-		return nil, err
+		return nil, &mcpCallError{detail: err.Error()}
 	}
 	if result.IsError {
-		return nil, errors.New("MCP tool execution failed")
+		parts := []string{}
+		for _, content := range result.Content {
+			if text, ok := content.(*mcp.TextContent); ok {
+				parts = append(parts, text.Text)
+			}
+		}
+		return nil, &mcpCallError{detail: "MCP 工具执行失败: " + strings.Join(parts, " ")}
 	}
 	data, err := json.Marshal(result)
 	if len(data) > 8<<20 {
