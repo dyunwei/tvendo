@@ -35,6 +35,7 @@ import {
   AlertCircle,
 } from "lucide-vue-next";
 import Admin from "./Admin.vue";
+import Recharge from "./components/Recharge.vue";
 import { copyText } from "./clipboard";
 import { useEscapeClose } from "./useEscapeClose";
 import { api, session, money, date, refreshSession } from "./api";
@@ -86,6 +87,7 @@ const dailyInput = ref(3),
   revokeID = ref<number | null>(null),
   copied = ref(false),
   agent = ref("通用 Agent");
+const recharge = ref<InstanceType<typeof Recharge> | null>(null);
 const usageDetail = ref<any>(null);
 function closeModal() {
   if (busy.value || invoking.value) return;
@@ -1034,25 +1036,19 @@ const statusLabel = (s: string) =>
                 <RefreshCw :size="16" />
               </button>
             </header>
-            <strong>{{ money(session.user?.balance || 0) }}</strong><button
-              class="btn dark"
-              @click="
-                notice =
-                  '请联系平台管理员，提供你的注册邮箱 ' +
-                  session.user?.email +
-                  '。管理员入账后，记录将显示在下方。'
-              "
-            >
-              <Plus :size="16" />充值
+            <strong>{{ money(session.user?.balance || 0) }}</strong>
+            <button class="btn dark" @click="recharge?.openTopup()">
+              <Plus :size="16" />充值 · Topup
             </button>
             <div class="wallet-bottom">
               <ShieldCheck :size="17" /><span
-                >人工充值<small
-                  >联系管理员为账户入账，支持填写充值备注。</small
+                >人民币余额<small
+                  >充值到账后，所有工具共享同一个余额。</small
                 ></span
               >
             </div>
           </div>
+          <Recharge ref="recharge" @paid="load" />
           <div class="section-heading">
             <h3>充值记录</h3>
             <span>最近 200 条账目中的充值</span>
@@ -1091,7 +1087,7 @@ const statusLabel = (s: string) =>
           <div v-else class="panel empty-state compact">
             <Receipt :size="38" />
             <h3>还没有充值记录</h3>
-            <p>管理员为你充值后，入账记录将显示在这里。</p>
+            <p>充值到账后，入账记录将显示在这里。</p>
           </div>
           <div class="section-heading">
             <h3>消费记录</h3>

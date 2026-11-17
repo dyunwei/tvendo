@@ -106,12 +106,13 @@ jobs:
         run: |
           mkdir -p distribution/deployment
           cp compose.yaml distribution/deployment/compose.yaml
+          cp compose.wechat.yaml distribution/deployment/compose.wechat.yaml
           sed "s/^TVENDO_VERSION=.*/TVENDO_VERSION=${RELEASE_VERSION}/" .env.example > distribution/deployment/env.example
       - name: Attach CLI and deployment artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" distribution/dist/* distribution/deployment/compose.yaml distribution/deployment/env.example --clobber
+        run: gh release upload "$RELEASE_TAG" distribution/dist/* distribution/deployment/compose.yaml distribution/deployment/compose.wechat.yaml distribution/deployment/env.example --clobber
 
   npm:
     name: Publish npm CLI

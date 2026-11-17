@@ -7,3 +7,6 @@ backend/tvendo
 *.log
 
 backend/bin
+
+secrets/
+*.pem

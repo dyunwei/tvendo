@@ -15,3 +15,6 @@ backend/tvendo
 backend/bin/
 
 distribution/dist/
+
+secrets/
+*.pem

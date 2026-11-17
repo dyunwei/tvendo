@@ -56,3 +56,24 @@ CREATE TABLE IF NOT EXISTS catalog_embeddings (
  PRIMARY KEY (tool_id, endpoint_id, model_key)
 );
 CREATE INDEX IF NOT EXISTS catalog_embeddings_model ON catalog_embeddings(model_key);
+
+-- Online payments are separate from ledger entries. Only verified payments credit balances.
+CREATE TABLE IF NOT EXISTS payment_orders (
+ id TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id),
+ request_key TEXT NOT NULL, appid TEXT NOT NULL, mch_id TEXT NOT NULL,
+ amount_cents BIGINT NOT NULL CHECK (amount_cents IN (1,1000,5000,10000,20000)),
+ status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','closed')),
+ code_url TEXT NOT NULL DEFAULT '', transaction_id TEXT UNIQUE,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL,
+ paid_at TIMESTAMPTZ, next_check_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(user_id,request_key)
+);
+CREATE INDEX IF NOT EXISTS payment_orders_user ON payment_orders(user_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS payment_orders_recovery ON payment_orders(next_check_at) WHERE status='pending';
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_order_id TEXT REFERENCES payment_orders(id);
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_payment_order ON transactions(payment_order_id) WHERE payment_order_id IS NOT NULL;
+
+-- Upgrade existing payment tables to permit a one-cent payment for live testing.
+ALTER TABLE payment_orders
+ DROP CONSTRAINT IF EXISTS payment_orders_amount_cents_check,
+ ADD CONSTRAINT payment_orders_amount_cents_check CHECK (amount_cents IN (1,1000,5000,10000,20000));

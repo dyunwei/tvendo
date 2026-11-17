@@ -1,0 +1,10 @@
+# Optional key mount: docker compose -f compose.yaml -f compose.wechat.yaml up -d
+services:
+  app:
+    volumes:
+      - type: bind
+        source: ${WECHAT_PAY_KEYS_DIR:-./secrets/wechat-pay}
+        target: /run/secrets/wechat-pay
+        read_only: true
+        bind:
+          create_host_path: false

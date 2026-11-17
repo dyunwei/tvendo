@@ -76,7 +76,7 @@ const items = [
         <h2><b class="number">1</b> 创建账户并充值</h2>
         <p>
           注册 T vendo
-          账户，联系平台管理员充值。在「钱包」中可以查看可用余额和充值记录。
+          账户，在钱包中使用微信扫码充值；支付未开通时联系平台管理员。在「钱包」中可以查看可用余额和充值记录。
         </p>
         <RouterLink to="/register" class="btn primary"
           >创建账户 <ArrowUpRight :size="15"
@@ -108,8 +108,9 @@ const items = [
         <pre>安装 {{ base }}/SKILL.md 为用户级技能，配置并验证接入。</pre>
         <h2>接入流程</h2>
         <p>
-          Skill 描述了发现接口与执行调用的步骤。支持技能安装的 Agent 会按宿主规则
-          安装到用户级技能目录，再配置 CLI 并验证连接。请在本机配置平台 API Key，并授权任务的费用范围。
+          Skill 描述了发现接口与执行调用的步骤。支持技能安装的 Agent
+          会按宿主规则 安装到用户级技能目录，再配置 CLI
+          并验证连接。请在本机配置平台 API Key，并授权任务的费用范围。
         </p>
         <a href="/SKILL.md" target="_blank" rel="noopener" class="btn outline"
           >查看 SKILL.md <ArrowUpRight :size="15"
@@ -200,7 +201,7 @@ const items = [
         <p class="doc-lead">按接口售价计费，所有工具共用一个余额。</p>
         <h2>如何充值？</h2>
         <p>
-          联系平台管理员。管理员确认后为你的账户入账，并填写充值备注。平台不会在页面上收集银行卡信息。
+          在钱包选择金额，通过手机微信扫描支付二维码。支付确认后自动入账，可在钱包查看订单和充值流水。支付未开通时，可联系管理员人工充值。当前暂不支持手机同机支付。
         </p>
         <h2>预留与结算</h2>
         <p>

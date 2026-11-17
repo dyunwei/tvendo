@@ -7,6 +7,7 @@ Tvendo 是让 Agent 发现和调用工具的自托管平台。仓库首页提供
 | [部署说明](deployment.md) | 部署者：镜像、Compose、环境变量、HTTPS、升级、备份与恢复 |
 | [Agent 接入](agent-access.md) | 用户与 Agent：Skill、npm、二进制安装、配置、命令与故障处理 |
 | [上游工具接入](upstreams.md) | 管理员：HTTP / MCP 工具、同步、上下架与定价 |
+| [微信支付](wechat-pay.md) | 部署者：密钥配置、扫码充值、订单补查和验收 |
 | [API 参考](api.md) | 开发者：鉴权、工具目录、调用、记录、余额与预算 |
 | [本地开发与测试](development.md) | 贡献者：开发环境、源码构建与测试 |
 | [维护与发布](maintaining.md) | 维护者：版本、GitHub Release、Docker Hub 与 npm |

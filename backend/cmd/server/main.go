@@ -39,6 +39,7 @@ type App struct {
 	publicURL         string
 	secure            bool
 	client            *http.Client
+	payments          *wechatPayment
 	search            *catalogSearch
 	searchFallbackRef string
 }
@@ -790,7 +791,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	if bal < ep.Price {
-		agentError(w, 402, "INSUFFICIENT_BALANCE", "余额不足，请联系管理员充值", "not_started", 0, requestID)
+		agentError(w, 402, "INSUFFICIENT_BALANCE", "余额不足，请前往钱包充值", "not_started", 0, requestID)
 		return
 	}
 	if ce && ep.Price > call || de && spent+ep.Price > daily {
@@ -962,6 +963,12 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/admin/users", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,name,email,role,balance,created_at FROM users ORDER BY id DESC LIMIT 1000) x`)
 	}))
+	m.HandleFunc("GET /api/payments/config", a.withUser(false, a.paymentConfig))
+	m.HandleFunc("POST /api/payments/orders", a.paymentOrderRequest(a.withUser(false, a.createPayment)))
+	m.HandleFunc("GET /api/payments/orders", a.withUser(false, a.paymentOrders))
+	m.HandleFunc("GET /api/payments/orders/{id}", a.withUser(false, a.getPayment))
+	m.HandleFunc("POST /api/payments/wechat/notify", a.wechatNotify)
+	m.HandleFunc("GET /api/admin/payments", a.withUser(true, a.adminPaymentOrders))
 	m.HandleFunc("POST /api/admin/topup", a.withUser(true, a.topup))
 	m.HandleFunc("GET /api/admin/audit", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT a.id,a.action,a.target_id,a.created_at,u.email AS actor FROM audit_log a JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 200) x`)
@@ -1062,6 +1069,13 @@ func main() {
 	}
 	if a.search != nil {
 		go a.runSearchIndexer(ctx)
+	}
+	a.payments, e = newWechatPayment(ctx)
+	if e != nil {
+		log.Fatal(e)
+	}
+	if a.payments != nil {
+		go a.runPaymentRecovery(ctx)
 	}
 	a.recoverRuns(ctx)
 	go func() {

@@ -73,7 +73,7 @@ tvendo tools search '网页搜索' --json
 
 ## 项目状态
 
-当前采用人工充值，支持同步 HTTP / JSON 和远程 MCP 工具调用。工具与供应商凭据由部署管理员配置，不附带现成的付费服务。已知限制与验证范围见 [兼容性](docs/compatibility.md)。
+支持微信 Native 扫码充值（需配置商户密钥），保留管理员人工充值；支持同步 HTTP / JSON 和远程 MCP 工具调用。工具与供应商凭据由部署管理员配置，不附带现成的付费服务。已知限制与验证范围见 [兼容性](docs/compatibility.md)。
 
 ## 文档与贡献
 

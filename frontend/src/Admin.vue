@@ -22,6 +22,7 @@ import {
 import { api, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
 import MCPTools from "./MCPTools.vue";
+import Recharge from "./components/Recharge.vue";
 import { useEscapeClose } from "./useEscapeClose";
 const route = useRoute(),
   section = computed(() => String(route.params.section || "tools"));
@@ -349,8 +350,9 @@ function downloadExample() {
             </tbody>
           </table>
         </PaginatedTable>
-      </div></template
-    >
+      </div>
+      <Recharge admin />
+    </template>
     <template v-else-if="section === 'audit'"
       ><div class="panel table-wrap">
         <PaginatedTable
@@ -492,10 +494,7 @@ function downloadExample() {
       </div></template
     >
     <Teleport to="body"
-      ><div
-        v-if="editing"
-        class="modal-backdrop editor-backdrop"
-      >
+      ><div v-if="editing" class="modal-backdrop editor-backdrop">
         <section
           class="modal tool-editor"
           role="dialog"
@@ -743,10 +742,7 @@ function downloadExample() {
           </form>
         </section>
       </div>
-      <div
-        v-if="topupUser"
-        class="modal-backdrop"
-      >
+      <div v-if="topupUser" class="modal-backdrop">
         <form
           class="modal"
           role="dialog"

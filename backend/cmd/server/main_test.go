@@ -546,4 +546,5 @@ func TestIntegrationBilling(t *testing.T) {
 	if provider.Revision != originalRevision || len(provider.Endpoints) != 4 {
 		t.Fatal("failed sync modified catalog")
 	}
+	t.Run("WeChat payments", func(t *testing.T) { exercisePayments(t, a, userCookie, userCSRF, userID) })
 }
