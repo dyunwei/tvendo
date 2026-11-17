@@ -59,3 +59,14 @@
 - Go vet、race 单元及隔离 PostgreSQL / Redis 全量集成测试通过，包含人民币金额下的余额预留、并发限额、退款、调用记录币种与账目一致性。
 - 前端 TypeScript / 生产构建和浏览器验证通过：余额、预算符号、微元售价（¥0.000001）、API 的 CNY / 精度标识；已更新控制台截图。
 - 六平台 CLI 构建和实际 npm 包安装 smoke test 通过，验证结果包含 CNY。所有测试使用临时服务与数据，未修改线上数据库。
+
+## 0.1.4 发布准备验证（2026-11-17）
+
+- VERSION 与正式发布标签 `v0.1.4`、npm `latest` 和 Docker 镜像版本的元数据校验通过；发布脚本测试通过。
+- Go vet、race 单元及使用独立临时 PostgreSQL 17 / Redis 7 的集成测试通过，包含微信支付验签、通知幂等、入账与补查；测试容器已清理。五项需要真实上游或目录配置的 live 测试未启用。
+- 前端 TypeScript / 生产构建通过；钱包使用模拟订单完成桌面 1440px 与手机 390px 浏览器检查，覆盖记录切换、金额符号、充值弹窗、继续支付、空状态及页面横向溢出。
+- 六平台 CLI 交叉编译、版本及校验清单验证通过；实际 npm 包的 npx 启动、安装、校验失败拦截和调用结果保存 smoke test 通过，npm publish dry-run 通过，未发布包。
+- 使用测试配置验证基础 Compose 与微信支付密钥挂载 overlay 合并配置通过。
+- 使用已验证 CLI 产物完成 Linux amd64 发布 Docker 镜像构建（`CLI_SOURCE=cli-release`）；默认 Go 依赖源下载停滞，改用文档中的 `GOPROXY=https://goproxy.cn,direct` 完成构建。
+
+上述支付检查使用测试密钥、模拟微信响应和临时数据库，不代表真实商户付款验收。本次准备未执行 GitHub Release 发布或 Docker Hub / npm 推送。

@@ -1,6 +1,6 @@
 # 微信扫码充值
 
-第一版使用微信支付 APIv3 普通商户 Native 支付，通过官方 Go SDK 签名、验签和解密。支持 ¥0.01、¥10、¥50、¥100、¥200 等额充值，默认选中 ¥0.01 方便真实付款测试；平台内部仍使用整数微元，1 分 = 10,000 微元。保留管理员人工充值。钱包余额卡的「充值 · Topup」打开充值方式弹窗：微信支付为当前账户充值；管理员还可选择「管理员直接充值」，指定用户、自定义金额和备注，直接入账并记录操作日志，不依赖微信支付是否开启。原管理端的用户充值按钮继续保留。
+第一版使用微信支付 APIv3 普通商户 Native 支付，通过官方 Go SDK 签名、验签和解密。支持 ¥0.01、¥10、¥50、¥100、¥200 等额充值，默认选中 ¥0.01 方便真实付款测试；平台内部仍使用整数微元，1 分 = 10,000 微元。保留管理员人工充值。钱包余额卡的「充值」打开充值方式弹窗：微信支付为当前账户充值；管理员还可选择「管理员直接充值」，指定用户、自定义金额和备注，直接入账并记录操作日志，不依赖微信支付是否开启。原管理端的用户充值按钮继续保留。
 
 ## 配置
 
@@ -15,7 +15,8 @@
 | `WECHAT_PAY_MCH_ID` | 普通商户号 |
 | `WECHAT_PAY_API_V3_KEY` | 商户平台设置的 32 字节 APIv3 密钥 |
 | `WECHAT_PAY_SERIAL_NO` | 商户 API 证书序列号 |
-| `WECHAT_PAY_PRIVATE_KEY_PATH` | 商户 API 私钥 `apiclient_key.pem` 的路径 |
+| `WECHAT_PAY_KEYS_DIR` | 仅 Compose 使用：宿主机密钥目录，默认 `./secrets/wechat-pay` |
+| `WECHAT_PAY_PRIVATE_KEY_PATH` | 商户 API 私钥 `apiclient_key.pem` 的路径；Docker 部署填写容器内路径 |
 | `WECHAT_PAY_VERIFY_MODE` | `certificate`（平台证书）或 `public_key`（默认，微信支付公钥） |
 | `WECHAT_PAY_PLATFORM_CERT_PATH` | 仅 `certificate` 模式必填：微信支付平台证书 PEM 文件或多证书 PEM 合集路径 |
 | `WECHAT_PAY_PUBLIC_KEY_ID` | 仅 `public_key` 模式必填：微信支付公钥 ID，`PUB_KEY_ID_` 开头 |
@@ -72,6 +73,15 @@ curl -fsSLO https://github.com/dyunwei/tvendo/releases/latest/download/compose.w
 docker compose -f compose.yaml -f compose.wechat.yaml up -d
 ```
 
+`compose.wechat.yaml` 将 `WECHAT_PAY_KEYS_DIR` 整个目录只读挂载到容器内固定的 `/run/secrets/wechat-pay`。例如宿主机私钥为 `/opt/tvendo/keys/apiclient_key.pem`，则配置：
+
+```env
+WECHAT_PAY_KEYS_DIR=/opt/tvendo/keys
+WECHAT_PAY_PRIVATE_KEY_PATH=/run/secrets/wechat-pay/apiclient_key.pem
+```
+
+通常只需修改 `WECHAT_PAY_KEYS_DIR`；私钥文件名不变时，`WECHAT_PAY_PRIVATE_KEY_PATH` 保持默认。微信支付公钥与平台证书的 `*_PATH` 同样填写容器内路径。宿主机目录须预先创建，Compose 不会自动创建它。
+
 本地 Go 开发将所选模式的 `*_PATH` 改为本机实际路径，并手动导出 `.env`；应用不会自动读取该文件。支付关闭时无需任何支付密钥；显式开启但缺少或填错配置会阻止服务启动。
 
 ## 订单和入账
@@ -86,7 +96,7 @@ docker compose -f compose.yaml -f compose.wechat.yaml up -d
 
 ## 测试支付与后台日志
 
-钱包「充值 · Topup」的微信支付默认选择 ¥0.01，这是实际支付，确认成功后给当前账户入账 10,000 微元。其他充值金额仍可选；管理员直接充值不经过微信。
+钱包「充值」的微信支付默认选择 ¥0.01，这是实际支付，确认成功后给当前账户入账 10,000 微元。其他充值金额仍可选；管理员直接充值不经过微信。
 
 后台日志统一带 `wechat_pay` 前缀，后接 JSON 字段。Compose 部署可查看：
 
