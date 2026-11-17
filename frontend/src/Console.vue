@@ -88,6 +88,7 @@ const dailyInput = ref(3),
   copied = ref(false),
   agent = ref("通用 Agent");
 const recharge = ref<InstanceType<typeof Recharge> | null>(null);
+const walletTab = ref("orders");
 const usageDetail = ref<any>(null);
 function closeModal() {
   if (busy.value || invoking.value) return;
@@ -1022,116 +1023,138 @@ const statusLabel = (s: string) =>
               >探索工具 <ArrowUpRight :size="14"
             /></RouterLink></div
         ></template>
-        <template v-else-if="page === 'wallet'"
-          ><div class="page-heading">
+        <template v-else-if="page === 'wallet'">
+          <div class="page-heading">
             <div>
               <h1>钱包</h1>
-              <p>一个余额，连接所有工具。</p>
+              <p>管理余额、充值与支出。</p>
             </div>
           </div>
-          <div class="panel wallet-card">
-            <header>
-              <span>可用余额</span
-              ><button class="icon-btn" @click="load" aria-label="刷新余额">
-                <RefreshCw :size="16" />
-              </button>
-            </header>
-            <strong>{{ money(session.user?.balance || 0) }}</strong>
-            <button class="btn dark" @click="recharge?.openTopup()">
-              <Plus :size="16" />充值 · Topup
+          <section class="panel wallet-overview" aria-label="账户余额">
+            <div class="wallet-balance">
+              <div class="wallet-balance-label">
+                <span>可用余额 <small>CNY</small></span>
+                <button
+                  class="icon-btn"
+                  :disabled="loading"
+                  @click="load"
+                  aria-label="刷新余额"
+                >
+                  <RefreshCw
+                    :size="15"
+                    :class="{ 'wallet-refreshing': loading }"
+                  />
+                </button>
+              </div>
+              <strong>{{ money(session.user?.balance || 0) }}</strong>
+              <p>余额可用于所有工具调用。</p>
+            </div>
+            <button
+              class="btn dark wallet-topup"
+              @click="recharge?.openTopup()"
+            >
+              <Plus :size="16" />充值
             </button>
-            <div class="wallet-bottom">
-              <ShieldCheck :size="17" /><span
-                >人民币余额<small
-                  >充值到账后，所有工具共享同一个余额。</small
-                ></span
-              >
+          </section>
+          <section class="wallet-records" aria-label="钱包记录">
+            <div class="wallet-records-heading">
+              <div class="wallet-tabs" role="group" aria-label="记录类型">
+                <button
+                  :class="{ active: walletTab === 'orders' }"
+                  :aria-pressed="walletTab === 'orders'"
+                  @click="walletTab = 'orders'"
+                >
+                  充值订单
+                </button>
+                <button
+                  :class="{ active: walletTab === 'transactions' }"
+                  :aria-pressed="walletTab === 'transactions'"
+                  @click="walletTab = 'transactions'"
+                >
+                  资金流水
+                </button>
+              </div>
+              <RouterLink to="/app/usage"
+                >查看用量 <ArrowUpRight :size="14"
+              /></RouterLink>
             </div>
-          </div>
-          <Recharge ref="recharge" @paid="load" />
-          <div class="section-heading">
-            <h3>充值记录</h3>
-            <span>最近 200 条账目中的充值</span>
-          </div>
-          <div
-            v-if="transactions.some((t) => t.kind === 'topup')"
-            class="panel table-wrap"
-          >
-            <PaginatedTable
-              :items="transactions.filter((x) => x.kind === 'topup')"
-              :reset-key="page"
-              label="充值记录分页"
-              note="最近 200 条账目中的充值"
-              v-slot="{ rows }"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>流水号</th>
-                    <th>入账金额</th>
-                    <th>备注</th>
-                    <th>时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="t in rows" :key="t.id">
-                    <td>#{{ t.id }}</td>
-                    <td class="positive">+{{ money(t.amount) }}</td>
-                    <td><TableText :text="t.note || '管理员充值'" /></td>
-                    <td>{{ date(t.created_at) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </PaginatedTable>
-          </div>
-          <div v-else class="panel empty-state compact">
-            <Receipt :size="38" />
-            <h3>还没有充值记录</h3>
-            <p>充值到账后，入账记录将显示在这里。</p>
-          </div>
-          <div class="section-heading">
-            <h3>消费记录</h3>
-            <RouterLink to="/app/usage"
-              >查看用量 <ArrowUpRight :size="14"
-            /></RouterLink>
-          </div>
-          <div
-            v-if="transactions.some((t) => t.kind === 'usage')"
-            class="panel table-wrap"
-          >
-            <PaginatedTable
-              :items="transactions.filter((x) => x.kind === 'usage')"
-              :reset-key="page"
-              label="消费记录分页"
-              note="最近 200 条账目中的消费"
-              v-slot="{ rows }"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>流水号</th>
-                    <th>消费金额</th>
-                    <th>关联调用</th>
-                    <th>时间</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="t in rows" :key="t.id">
-                    <td>#{{ t.id }}</td>
-                    <td>{{ money(t.amount) }}</td>
-                    <td><TableText :text="t.note" /></td>
-                    <td>{{ date(t.created_at) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </PaginatedTable>
-          </div>
-          <div v-else class="panel empty-state compact">
-            <History :size="38" />
-            <h3>还没有消费记录</h3>
-            <p>成功调用工具后的扣费将在这里显示。</p>
-          </div></template
-        >
+            <div v-show="walletTab === 'orders'">
+              <Recharge ref="recharge" embedded @paid="load" />
+            </div>
+            <div v-if="walletTab === 'transactions'">
+              <div class="wallet-records-toolbar">
+                <span>充值入账与工具扣费 · 最近 200 条账目</span>
+              </div>
+              <div
+                v-if="transactions.length"
+                class="panel table-wrap wallet-ledger"
+              >
+                <PaginatedTable
+                  :items="transactions"
+                  :reset-key="page"
+                  label="资金流水分页"
+                  v-slot="{ rows }"
+                >
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>类型 / 说明</th>
+                        <th class="wallet-money">金额</th>
+                        <th>时间</th>
+                        <th>流水号</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="t in rows" :key="t.id">
+                        <td>
+                          <span class="wallet-entry-kind">{{
+                            t.kind === "topup"
+                              ? "充值入账"
+                              : t.kind === "usage"
+                                ? "工具消费"
+                                : "余额变动"
+                          }}</span
+                          ><span class="wallet-entry-note"
+                            ><TableText
+                              :text="
+                                t.note ||
+                                (t.kind === 'topup' ? '管理员充值' : '—')
+                              "
+                          /></span>
+                        </td>
+                        <td
+                          class="wallet-money"
+                          :class="{ 'wallet-credit': t.amount > 0 }"
+                        >
+                          {{ t.amount > 0 ? "+" : t.amount < 0 ? "−" : ""
+                          }}{{ money(Math.abs(t.amount)) }}
+                        </td>
+                        <td class="wallet-secondary">
+                          {{ date(t.created_at) }}
+                        </td>
+                        <td class="wallet-secondary">#{{ t.id }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </PaginatedTable>
+              </div>
+              <div v-else-if="loading" class="panel wallet-empty" role="status">
+                <LoaderCircle :size="24" class="wallet-refreshing" />
+                <div>
+                  <h3>正在加载资金流水</h3>
+                  <p>请稍候。</p>
+                </div>
+              </div>
+              <div v-else class="panel wallet-empty">
+                <Receipt :size="26" />
+                <div>
+                  <h3>还没有资金流水</h3>
+                  <p>充值入账和工具扣费后，记录会显示在这里。</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
       </div>
       <footer class="console-footer">
         <span>T vendo · The tool layer for your agent.</span

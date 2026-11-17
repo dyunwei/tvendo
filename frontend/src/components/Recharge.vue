@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import QRCode from "qrcode";
 import { api as baseAPI, date, money, session } from "../api";
 import { useEscapeClose } from "../useEscapeClose";
-import { X, RefreshCw } from "lucide-vue-next";
+import { X, RefreshCw, Receipt } from "lucide-vue-next";
 import PaginatedTable from "./PaginatedTable.vue";
 // randomUUID requires a secure context; getRandomValues also works for HTTP LAN development.
 function newPaymentRequestKey() {
@@ -29,7 +29,7 @@ async function api<T = any>(
     clearTimeout(timeout);
   }
 }
-const props = defineProps<{ admin?: boolean }>();
+const props = defineProps<{ admin?: boolean; embedded?: boolean }>();
 const emit = defineEmits<{ paid: [] }>();
 interface Order {
   id: string;
@@ -51,6 +51,7 @@ const qr = ref(""),
   pollError = ref(""),
   busy = ref(false);
 const choosing = ref(false);
+const ordersLoading = ref(true);
 const method = ref("wechat");
 const canCredit = computed(() => session.user?.role === "admin");
 const users = ref<
@@ -127,10 +128,13 @@ let polling = false,
   qrVersion = 0;
 const endpoint = props.admin ? "/api/admin/payments" : "/api/payments/orders";
 async function load() {
+  ordersLoading.value = true;
   try {
     orders.value = await api<Order[]>(endpoint);
   } catch (e) {
     error.value = (e as Error).message;
+  } finally {
+    ordersLoading.value = false;
   }
 }
 async function open(order: Order) {
@@ -250,17 +254,28 @@ onUnmounted(() => {
   <p v-if="success" class="alert" role="status">{{ success }}</p>
   <p v-if="error" role="alert" class="recharge-error">{{ error }}</p>
   <p v-if="pollError && !active" role="status">{{ pollError }}</p>
-  <div class="section-heading">
-    <h3>{{ admin ? "在线充值订单" : "微信支付订单" }}</h3>
-    <button class="btn outline small" @click="load">
+  <div :class="embedded ? 'wallet-records-toolbar' : 'section-heading'">
+    <span v-if="embedded">最近 100 条订单 · 待支付订单可继续付款</span>
+    <h3 v-else>{{ admin ? "在线充值订单" : "微信支付订单" }}</h3>
+    <button class="btn outline small" :disabled="ordersLoading" @click="load">
       <RefreshCw :size="14" />刷新
     </button>
   </div>
-  <div class="panel table-wrap">
+  <div
+    v-if="orders.length || !embedded"
+    class="panel table-wrap"
+    :class="{ 'wallet-orders': embedded }"
+  >
     <PaginatedTable
       :items="orders"
       label="充值订单分页"
-      :note="admin ? '最近 200 条订单' : '最近 100 条订单，可继续未完成的支付'"
+      :note="
+        embedded
+          ? undefined
+          : admin
+            ? '最近 200 条订单'
+            : '最近 100 条订单，可继续未完成的支付'
+      "
       v-slot="{ rows }"
     >
       <table>
@@ -268,7 +283,7 @@ onUnmounted(() => {
           <tr>
             <th v-if="admin">用户</th>
             <th>订单</th>
-            <th>金额</th>
+            <th :class="{ 'wallet-money': embedded }">金额</th>
             <th>状态</th>
             <th>创建时间</th>
             <th v-if="!admin"></th>
@@ -284,17 +299,26 @@ onUnmounted(() => {
                 >微信交易号 {{ order.transaction_id }}</small
               >
             </td>
-            <td>{{ money(order.amount_cents * 10000) }}</td>
-            <td>
-              {{ labels[order.status]
-              }}{{
-                order.status === "pending" &&
-                Date.now() >= Date.parse(order.expires_at)
-                  ? " · 确认中"
-                  : ""
-              }}
+            <td :class="{ 'wallet-money': embedded }">
+              {{ money(order.amount_cents * 10000) }}
             </td>
-            <td>{{ date(order.created_at) }}</td>
+            <td>
+              <span
+                :class="
+                  embedded ? ['wallet-order-status', order.status] : undefined
+                "
+                >{{ labels[order.status]
+                }}{{
+                  order.status === "pending" &&
+                  Date.now() >= Date.parse(order.expires_at)
+                    ? " · 确认中"
+                    : ""
+                }}</span
+              >
+            </td>
+            <td :class="{ 'wallet-secondary': embedded }">
+              {{ date(order.created_at) }}
+            </td>
             <td v-if="!admin">
               <button class="btn outline small" @click="open(order)">
                 {{ order.status === "pending" ? "查看支付" : "查看订单" }}
@@ -307,6 +331,22 @@ onUnmounted(() => {
         </tbody>
       </table>
     </PaginatedTable>
+  </div>
+  <div
+    v-else
+    class="panel wallet-empty"
+    :role="ordersLoading ? 'status' : undefined"
+  >
+    <RefreshCw v-if="ordersLoading" :size="24" class="wallet-refreshing" />
+    <Receipt v-else :size="26" />
+    <div>
+      <h3>{{ ordersLoading ? "正在加载充值订单" : "还没有充值订单" }}</h3>
+      <p>
+        {{
+          ordersLoading ? "请稍候。" : "充值后可在这里查看支付状态和订单详情。"
+        }}
+      </p>
+    </div>
   </div>
   <Teleport to="body">
     <div v-if="choosing" class="modal-backdrop" @click.self="close">
@@ -326,7 +366,7 @@ onUnmounted(() => {
         >
           <X :size="20" />
         </button>
-        <h2 id="topup-title">充值 · Topup</h2>
+        <h2 id="topup-title">充值</h2>
         <p>选择充值方式和金额。</p>
         <label
           >充值方式<select v-model="method" :disabled="busy">
