@@ -36,6 +36,7 @@ import {
 } from "lucide-vue-next";
 import Admin from "./Admin.vue";
 import { copyText } from "./clipboard";
+import { useEscapeClose } from "./useEscapeClose";
 import { api, session, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
 const route = useRoute(),
@@ -86,6 +87,15 @@ const dailyInput = ref(3),
   copied = ref(false),
   agent = ref("通用 Agent");
 const usageDetail = ref<any>(null);
+function closeModal() {
+  if (busy.value || invoking.value) return;
+  creating.value = false;
+  newKey.value = "";
+  revokeID.value = null;
+  invocation.value = null;
+  usageDetail.value = null;
+}
+useEscapeClose(closeModal);
 const copyError = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 function resetCopy() {
@@ -1152,13 +1162,7 @@ const statusLabel = (s: string) =>
         <button
           class="modal-close icon-btn"
           :disabled="busy || invoking"
-          @click="
-            creating = false;
-            newKey = '';
-            revokeID = null;
-            invocation = null;
-            usageDetail = null;
-          "
+          @click="closeModal"
           aria-label="关闭"
         >
           <X :size="20" />

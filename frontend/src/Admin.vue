@@ -22,6 +22,7 @@ import {
 import { api, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
 import MCPTools from "./MCPTools.vue";
+import { useEscapeClose } from "./useEscapeClose";
 const route = useRoute(),
   section = computed(() => String(route.params.section || "tools"));
 const tools = ref<Tool[]>([]),
@@ -42,6 +43,11 @@ const tools = ref<Tool[]>([]),
   amount = ref(10),
   note = ref(""),
   defaultPrice = ref(0.001);
+useEscapeClose(() => {
+  if (busy.value) return;
+  if (topupUser.value) topupUser.value = null;
+  else editing.value = null;
+});
 const mcpEditing = computed(
   () =>
     editing.value?.upstream_type === "mcp" ||
@@ -489,7 +495,6 @@ function downloadExample() {
       ><div
         v-if="editing"
         class="modal-backdrop editor-backdrop"
-        @click.self="!busy && (editing = null)"
       >
         <section
           class="modal tool-editor"
@@ -741,7 +746,6 @@ function downloadExample() {
       <div
         v-if="topupUser"
         class="modal-backdrop"
-        @click.self="!busy && (topupUser = null)"
       >
         <form
           class="modal"
