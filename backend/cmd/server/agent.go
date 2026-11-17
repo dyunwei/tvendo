@@ -101,7 +101,8 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, err.Error())
 		return
 	}
-	agentOK(w, map[string]any{"items": page, "next_cursor": next, "currency": billing.Currency, "search": status})
+	suggestions := catalogSuggestions(docs, query, items, status, a.searchFallbackRef)
+	agentOK(w, map[string]any{"items": page, "suggested_tools": suggestions, "next_cursor": next, "currency": billing.Currency, "search": status})
 }
 func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 	limit, err := pageLimit(r, 20)

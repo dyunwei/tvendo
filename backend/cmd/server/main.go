@@ -33,13 +33,14 @@ import (
 var schema string
 
 type App struct {
-	db        *pgxpool.Pool
-	redis     *redis.Client
-	crypt     cipher.AEAD
-	publicURL string
-	secure    bool
-	client    *http.Client
-	search    *catalogSearch
+	db                *pgxpool.Pool
+	redis             *redis.Client
+	crypt             cipher.AEAD
+	publicURL         string
+	secure            bool
+	client            *http.Client
+	search            *catalogSearch
+	searchFallbackRef string
 }
 type User struct {
 	KeyID        int64  `json:"-"`
@@ -1049,6 +1050,10 @@ func main() {
 	}
 	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
 	if e = a.bootstrap(ctx); e != nil {
+		log.Fatal(e)
+	}
+	a.searchFallbackRef, e = configuredSearchFallbackRef()
+	if e != nil {
 		log.Fatal(e)
 	}
 	a.search, e = newCatalogSearch()

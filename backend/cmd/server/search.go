@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,12 +24,20 @@ import (
 type catalogSearch struct {
 	endpoint, model, revision, key, apiKey string
 	minScore                               float64
+	format                                 string
+	dimensions                             int
+	reranker                               *catalogReranker
+	cacheMu                                sync.Mutex
+	cache                                  map[string]catalogSearchCache
 	client                                 *http.Client
 }
 
 func newCatalogSearch() (*catalogSearch, error) {
 	endpoint := strings.TrimSpace(env("SEARCH_EMBEDDING_URL", ""))
 	if endpoint == "" {
+		if strings.TrimSpace(env("SEARCH_RERANK_URL", "")) != "" {
+			return nil, fmt.Errorf("SEARCH_RERANK_URL requires SEARCH_EMBEDDING_URL")
+		}
 		return nil, nil
 	}
 	u, err := url.Parse(endpoint)
@@ -39,9 +48,38 @@ func newCatalogSearch() (*catalogSearch, error) {
 	if err != nil || math.IsNaN(threshold) || threshold < -1 || threshold > 1 {
 		return nil, fmt.Errorf("SEARCH_MIN_SCORE must be between -1 and 1")
 	}
-	s := &catalogSearch{endpoint: endpoint, model: env("SEARCH_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"), revision: env("SEARCH_EMBEDDING_REVISION", "1"), apiKey: env("SEARCH_EMBEDDING_API_KEY", ""), minScore: threshold,
+	s := &catalogSearch{endpoint: endpoint, model: env("SEARCH_EMBEDDING_MODEL", "qwen3.7-text-embedding"), revision: env("SEARCH_EMBEDDING_REVISION", "1"), apiKey: env("SEARCH_EMBEDDING_API_KEY", ""), minScore: threshold,
 		client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-	s.key = searchHash(s.endpoint + "\x00" + s.model + "\x00" + s.revision + "\x00e5-prefix-v1")
+	s.format = env("SEARCH_EMBEDDING_FORMAT", "auto")
+	if s.format == "auto" {
+		s.format = "openai"
+		if strings.Contains(strings.ToLower(s.model), "e5") {
+			s.format = "e5"
+		}
+	}
+	if s.format != "openai" && s.format != "e5" {
+		return nil, fmt.Errorf("SEARCH_EMBEDDING_FORMAT must be auto, openai or e5")
+	}
+	defaultDimensions := "0"
+	if s.model == "qwen3.7-text-embedding" {
+		defaultDimensions = "1024"
+	}
+	s.dimensions, err = strconv.Atoi(env("SEARCH_EMBEDDING_DIMENSIONS", defaultDimensions))
+	if err != nil || s.dimensions < 0 || s.dimensions > 8192 {
+		return nil, fmt.Errorf("SEARCH_EMBEDDING_DIMENSIONS must be between 0 and 8192")
+	}
+	if s.model == "qwen3.7-text-embedding" && s.dimensions != 0 {
+		switch s.dimensions {
+		case 256, 512, 768, 1024, 1536, 2048, 2560:
+		default:
+			return nil, fmt.Errorf("unsupported SEARCH_EMBEDDING_DIMENSIONS for qwen3.7-text-embedding")
+		}
+	}
+	s.reranker, err = newCatalogReranker(s.client)
+	if err != nil {
+		return nil, err
+	}
+	s.key = searchHash(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00capability-v2", s.endpoint, s.model, s.revision, s.format, s.dimensions))
 	return s, nil
 }
 
@@ -49,14 +87,22 @@ func searchHash(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte
 
 func (s *catalogSearch) embed(ctx context.Context, texts []string, query bool) ([][]float64, error) {
 	input := make([]string, len(texts))
-	prefix := "passage: "
-	if query {
-		prefix = "query: "
+	prefix := ""
+	// Empty format preserves explicitly constructed legacy E5 clients.
+	if s.format == "e5" || s.format == "" {
+		prefix = "passage: "
+		if query {
+			prefix = "query: "
+		}
 	}
 	for i, text := range texts {
 		input[i] = prefix + text
 	}
-	body, err := json.Marshal(map[string]any{"model": s.model, "input": input})
+	payload := map[string]any{"model": s.model, "input": input, "encoding_format": "float"}
+	if s.dimensions > 0 {
+		payload["dimensions"] = s.dimensions
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +138,7 @@ func (s *catalogSearch) embed(ctx context.Context, texts []string, query bool) (
 		if row.Index < 0 || row.Index >= len(input) || vectors[row.Index] != nil || !normalizeVector(row.Embedding) {
 			return nil, fmt.Errorf("invalid embedding vector or index")
 		}
-		if dimension != 0 && len(row.Embedding) != dimension {
+		if (s.dimensions > 0 && len(row.Embedding) != s.dimensions) || (dimension != 0 && len(row.Embedding) != dimension) {
 			return nil, fmt.Errorf("inconsistent embedding dimensions")
 		}
 		dimension = len(row.Embedding)
@@ -147,9 +193,10 @@ func makeCatalogDocument(t Tool, ep Endpoint) catalogDocument {
 		description = strings.TrimSpace(t.Description)
 	}
 	item := catalogItem{Currency: "CNY", Ref: toolRef(t.ID, ep.ID), Name: ep.Name, Provider: t.Name, Description: description, SearchDescription: ep.SearchDescription, Price: effectivePrice(t, ep), InputSchema: ep.InputSchema, Example: endpointExample(t, ep), Type: t.UpstreamType, SchemaAvailable: len(ep.InputSchema) > 0 && string(ep.InputSchema) != "null"}
-	// Put endpoint-specific capability information first; provider prose is auxiliary.
-	text := strings.Join([]string{ep.Name, ep.SearchDescription, ep.Description, t.Name, t.Slug, ep.ID, t.Category, t.Description}, "\n")
-	return catalogDocument{toolID: t.ID, endpointID: ep.ID, item: item, text: text, hash: searchHash(text), keywords: strings.ToLower(text), exact: []string{strings.ToLower(ep.Name), strings.ToLower(ep.ID), strings.ToLower(t.Name), strings.ToLower(t.Slug), strings.ToLower(item.Ref)}}
+	// Semantic models see endpoint capabilities, not IDs or unrelated provider prose.
+	text := boundedSearchText(strings.Join([]string{ep.Name, ep.SearchDescription, description}, "\n"), 3000)
+	keywords := strings.Join([]string{ep.Name, ep.SearchDescription, ep.Description, t.Name, t.Slug, ep.ID, t.Category, t.Description}, "\n")
+	return catalogDocument{toolID: t.ID, endpointID: ep.ID, item: item, text: text, hash: searchHash(text), keywords: strings.ToLower(keywords), exact: []string{strings.ToLower(ep.Name), strings.ToLower(ep.ID), strings.ToLower(t.Name), strings.ToLower(t.Slug), strings.ToLower(item.Ref)}}
 }
 
 func (a *App) catalogDocuments(ctx context.Context) ([]catalogDocument, error) {
@@ -234,8 +281,8 @@ func (a *App) indexCatalog(ctx context.Context) error {
 			pending = append(pending, d)
 		}
 	}
-	for start := 0; start < len(pending); start += 16 {
-		end := start + 16
+	for start := 0; start < len(pending); start += 10 {
+		end := start + 10
 		if end > len(pending) {
 			end = len(pending)
 		}
@@ -260,11 +307,14 @@ func (a *App) indexCatalog(ctx context.Context) error {
 }
 
 type searchStatus struct {
-	Mode     string `json:"mode"`
-	Degraded bool   `json:"degraded"`
-	Reason   string `json:"reason,omitempty"`
-	Indexed  int    `json:"indexed"`
-	Total    int    `json:"total"`
+	Mode       string `json:"mode"`
+	Degraded   bool   `json:"degraded"`
+	Reason     string `json:"reason,omitempty"`
+	Indexed    int    `json:"indexed"`
+	Total      int    `json:"total"`
+	Reranked   bool   `json:"reranked"`
+	Candidates int    `json:"candidates,omitempty"`
+	Filtered   int    `json:"filtered,omitempty"`
 }
 type rankedDocument struct {
 	doc   catalogDocument
@@ -361,13 +411,27 @@ func rankCatalog(docs []catalogDocument, q string, query []float64, cached map[s
 	return items, indexed, mismatch
 }
 
-func (a *App) searchCatalog(ctx context.Context, docs []catalogDocument, q string) ([]catalogItem, searchStatus) {
+func (a *App) searchCatalogUncached(ctx context.Context, docs []catalogDocument, q string) ([]catalogItem, searchStatus) {
 	status := searchStatus{Mode: "keyword", Total: len(docs)}
+	// Identifiers are deterministic lookups and do not need paid inference.
+	exact := []catalogItem{}
+	for _, d := range docs {
+		if q == strings.ToLower(d.item.Ref) || q == strings.ToLower(d.endpointID) {
+			exact = append(exact, d.item)
+		}
+	}
+	if len(exact) > 0 {
+		return exact, status
+	}
 	var vector []float64
 	var cached map[string]catalogVector
 	threshold := 1.0
 	if a.search != nil {
 		threshold = a.search.minScore
+		if a.search.reranker != nil {
+			// Recall broadly; relevance is decided after reranking.
+			threshold = -1
+		}
 		searchCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		var err error
@@ -401,6 +465,9 @@ func (a *App) searchCatalog(ctx context.Context, docs []catalogDocument, q strin
 		if indexed == 0 {
 			status.Mode = "keyword"
 		}
+	}
+	if a.search != nil && a.search.reranker != nil && len(items) > 0 {
+		return a.rerankCatalog(ctx, docs, q, items, status)
 	}
 	return items, status
 }

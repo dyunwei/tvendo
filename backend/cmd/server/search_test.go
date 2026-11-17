@@ -48,6 +48,10 @@ func TestLiveCatalogSearchDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	threshold := s.minScore
+	if s.reranker != nil {
+		threshold = -1
+	}
 	for _, d := range docs {
 		keyword, exact := keywordScore(d, q)
 		v, ok := cached[d.item.Ref]
@@ -56,12 +60,32 @@ func TestLiveCatalogSearchDiagnostics(t *testing.T) {
 			continue
 		}
 		similarity, valid := cosine(vectors[0], v.vector)
-		t.Logf("%s (%s): keyword=%.0f exact=%t cosine=%.6f valid=%t semantic_hit=%t", d.item.Name, d.item.Ref, keyword, exact, similarity, valid, valid && similarity >= s.minScore)
+		t.Logf("%s (%s): keyword=%.0f exact=%t cosine=%.6f valid=%t semantic_hit=%t", d.item.Name, d.item.Ref, keyword, exact, similarity, valid, valid && similarity >= threshold)
 	}
-	items, indexed, mismatch := rankCatalog(docs, q, vectors[0], cached, s.minScore)
-	t.Logf("query=%q threshold=%.4f indexed=%d total=%d dimension_mismatch=%t", q, s.minScore, indexed, len(docs), mismatch)
+	items, indexed, mismatch := rankCatalog(docs, q, vectors[0], cached, threshold)
+	t.Logf("query=%q threshold=%.4f indexed=%d total=%d dimension_mismatch=%t", q, threshold, indexed, len(docs), mismatch)
 	for i, item := range items {
 		t.Logf("rank=%d name=%s ref=%s", i+1, item.Name, item.Ref)
+	}
+	if s.reranker != nil && len(items) > 0 {
+		if len(items) > s.reranker.candidates {
+			items = items[:s.reranker.candidates]
+		}
+		byRef := map[string]string{}
+		for _, d := range docs {
+			byRef[d.item.Ref] = d.text
+		}
+		texts := make([]string, len(items))
+		for i, item := range items {
+			texts[i] = byRef[item.Ref]
+		}
+		rows, err := s.reranker.rank(ctx, q, texts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows {
+			t.Logf("rerank name=%s score=%.6f cutoff=%.4f filtered=%t", items[*row.Index].Name, *row.Score, s.reranker.minScore, *row.Score < s.reranker.minScore)
+		}
 	}
 }
 
@@ -481,6 +505,95 @@ func verifyCatalogSearchIntegration(t *testing.T, a *App) {
 	}
 	if len(get("位置查询")["items"].([]any)) != 0 {
 		t.Fatal("disabled provider appeared via cached vector")
+	}
+	// Exercise the full rerank/cache path against persisted vectors in this dedicated test DB.
+	if _, err = a.db.Exec(ctx, `UPDATE tools SET enabled=true WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	var rerankRequests atomic.Int64
+	var rerankUnavailable atomic.Bool
+	var noRelevantTools atomic.Bool
+	reranker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rerankRequests.Add(1)
+		if rerankUnavailable.Load() {
+			w.WriteHeader(503)
+			return
+		}
+		var request struct {
+			Documents []string `json:"documents"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Error("invalid rerank request")
+		}
+		rows := make([]map[string]any, len(request.Documents))
+		for i, text := range request.Documents {
+			score := 0.01
+			if strings.Contains(text, "Search public web") && !noRelevantTools.Load() {
+				score = 0.9
+			}
+			rows[i] = map[string]any{"index": i, "relevance_score": score}
+		}
+		writeJSON(w, 200, map[string]any{"results": rows})
+	}))
+	defer reranker.Close()
+	a.search.reranker = &catalogReranker{endpoint: reranker.URL, format: "openai", minScore: 0.1, candidates: 30, client: reranker.Client()}
+	result = get("位置查询")
+	if len(result["items"].([]any)) != 1 || result["search"].(map[string]any)["reranked"] != true {
+		t.Fatalf("rerank not applied: %+v", result)
+	}
+	calls = requests.Load()
+	if len(get("位置查询")["items"].([]any)) != 1 || requests.Load() != calls || rerankRequests.Load() != 1 {
+		t.Fatal("repeated search did not reuse inference")
+	}
+	if _, err = a.db.Exec(ctx, `UPDATE tools SET endpoints=jsonb_set(endpoints, '{0,price_micros}', '1234') WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	result = get("位置查询")
+	if rerankRequests.Load() != 2 || result["items"].([]any)[0].(map[string]any)["price_micros"] != float64(1234) {
+		t.Fatalf("cache returned stale prices: %+v", result)
+	}
+	rerankUnavailable.Store(true)
+	result = get("地图")
+	if len(result["items"].([]any)) != 0 || result["search"].(map[string]any)["reason"] != "rerank_unavailable" {
+		t.Fatalf("unsafe rerank fallback: %+v", result)
+	}
+	rerankUnavailable.Store(false)
+	if get("地图")["search"].(map[string]any)["reranked"] != true {
+		t.Fatal("cached degraded results")
+	}
+	a.searchFallbackRef = toolRef(id, "web")
+	defer func() { a.searchFallbackRef = "" }()
+	noRelevantTools.Store(true)
+	result = get("不存在的专用能力")
+	suggested := result["suggested_tools"].([]any)
+	if len(result["items"].([]any)) != 0 || len(suggested) != 1 || suggested[0].(map[string]any)["tool_ref"] != a.searchFallbackRef || suggested[0].(map[string]any)["reason"] != "no_relevant_tool" {
+		t.Fatalf("fallback mixed with relevance matches: %+v", result)
+	}
+	// Reuse cached empty results, but still check the current catalog for suggestions.
+	calls = rerankRequests.Load()
+	if len(get("不存在的专用能力")["suggested_tools"].([]any)) != 1 || rerankRequests.Load() != calls {
+		t.Fatal("cached no-match lost suggestions")
+	}
+	if len(get("位置查询")["suggested_tools"].([]any)) != 0 {
+		t.Fatal("fallback shown with matched results")
+	}
+	rerankUnavailable.Store(true)
+	if len(get("模型服务故障")["suggested_tools"].([]any)) != 0 {
+		t.Fatal("degraded search advertised no-match fallback")
+	}
+	rerankUnavailable.Store(false)
+	if _, err = a.db.Exec(ctx, `UPDATE tools SET endpoints=jsonb_set(endpoints, '{0,disabled}', 'true') WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if len(get("不存在的专用能力")["suggested_tools"].([]any)) != 0 {
+		t.Fatal("disabled endpoint suggested")
+	}
+	if _, err = a.db.Exec(ctx, `UPDATE tools SET enabled=false WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+	result = get("位置查询")
+	if len(result["items"].([]any)) != 0 || len(result["suggested_tools"].([]any)) != 0 {
+		t.Fatal("cache exposed disabled endpoint or provider")
 	}
 }
 
