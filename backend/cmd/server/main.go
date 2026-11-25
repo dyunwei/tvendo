@@ -1014,6 +1014,9 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/payments/orders/{id}", a.withUser(false, a.getPayment))
 	m.HandleFunc("POST /api/payments/wechat/notify", a.wechatNotify)
 	m.HandleFunc("GET /api/admin/payments", a.withUser(true, a.adminPaymentOrders))
+	m.HandleFunc("POST /api/admin/payments/{id}/refund", a.withUser(true, a.requestPaymentRefund))
+	m.HandleFunc("GET /api/admin/payment-bills", a.withUser(true, a.listPaymentBills))
+	m.HandleFunc("POST /api/admin/payment-bills", a.withUser(true, a.requestPaymentBill))
 	m.HandleFunc("POST /api/admin/topup", a.withUser(true, a.topup))
 	m.HandleFunc("POST /api/admin/runs/{id}/resolve", a.withUser(true, a.resolveRun))
 	m.HandleFunc("GET /api/admin/audit", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
@@ -1123,6 +1126,8 @@ func main() {
 	}
 	if a.payments != nil {
 		go a.runPaymentRecovery(ctx)
+		go a.runRefundRecovery(ctx)
+		go a.runPaymentBillRecovery(ctx)
 	}
 	a.recoverRuns(ctx)
 	go func() {

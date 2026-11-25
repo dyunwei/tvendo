@@ -1158,7 +1158,9 @@ const statusLabel = (s: string) =>
                               ? "充值入账"
                               : t.kind === "usage"
                                 ? "工具消费"
-                                : "余额变动"
+                                : t.kind === "wechat_refund"
+                                  ? "微信退款"
+                                  : "余额变动"
                           }}</span><span class="wallet-entry-note"
                             ><TableText
                               :text="

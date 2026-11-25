@@ -25,15 +25,20 @@ import (
 	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/notify"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
+	"github.com/wechatpay-apiv3/wechatpay-go/services/refunddomestic"
 )
 
 type fakePaymentGateway struct {
-	prepayCalls atomic.Int32
-	closeCalls  atomic.Int32
-	prepayErr   error
-	transaction *payments.Transaction
-	queryErr    error
-	closeErr    error
+	prepayCalls    atomic.Int32
+	closeCalls     atomic.Int32
+	prepayErr      error
+	transaction    *payments.Transaction
+	queryErr       error
+	closeErr       error
+	refund         *refunddomestic.Refund
+	refundCreates  int
+	refundQueryErr error
+	bill           []byte
 }
 
 func (f *fakePaymentGateway) Prepay(context.Context, paymentOrder) (string, error) {
@@ -46,6 +51,16 @@ func (f *fakePaymentGateway) Query(context.Context, string) (*payments.Transacti
 func (f *fakePaymentGateway) Close(context.Context, string) error {
 	f.closeCalls.Add(1)
 	return f.closeErr
+}
+func (f *fakePaymentGateway) CreateRefund(context.Context, paymentOrder, string) (*refunddomestic.Refund, error) {
+	f.refundCreates++
+	return f.refund, nil
+}
+func (f *fakePaymentGateway) QueryRefund(context.Context, string) (*refunddomestic.Refund, error) {
+	return f.refund, f.refundQueryErr
+}
+func (f *fakePaymentGateway) DownloadBill(context.Context, string) ([]byte, error) {
+	return f.bill, nil
 }
 func successfulPayment(o paymentOrder) *payments.Transaction {
 	return &payments.Transaction{Appid: &o.AppID, Mchid: &o.MchID, OutTradeNo: &o.ID, TradeType: core.String("NATIVE"), TradeState: core.String("SUCCESS"), TransactionId: core.String("wx-" + o.ID), SuccessTime: core.String(time.Now().UTC().Format(time.RFC3339)), Amount: &payments.TransactionAmount{Currency: core.String("CNY"), Total: &o.AmountCents}}
@@ -439,6 +454,80 @@ func exercisePayments(t *testing.T, a *App, cookie *http.Cookie, csrf string, us
 		assertLedger(o, 1)
 	})
 
+	t.Run("full refund and bill reconciliation", func(t *testing.T) {
+		order := create(randomToken())
+		now := time.Now().In(billingDayZone)
+		billDay := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, billingDayZone)
+		paidAt := billDay.Add(time.Hour)
+		txn := successfulPayment(order)
+		txn.SuccessTime = core.String(paidAt.Format(time.RFC3339))
+		if err := a.applyPayment(ctx, txn); err != nil {
+			t.Fatal(err)
+		}
+		order = readOrder(order.ID)
+		var adminID int64
+		if err := a.db.QueryRow(ctx, `SELECT id FROM users WHERE role='admin'`).Scan(&adminID); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/admin/payments/" + order.ID + "/refund"
+		if w := request("POST", path, map[string]string{"reason": "requested"}, true, csrf); w.Code != 403 {
+			t.Fatalf("regular user can request refund: %d", w.Code)
+		}
+		register := func() int {
+			r := httptest.NewRequest("POST", path, strings.NewReader(`{"reason":"requested"}`))
+			r.SetPathValue("id", order.ID)
+			w := httptest.NewRecorder()
+			a.requestPaymentRefund(w, r, User{ID: adminID})
+			return w.Code
+		}
+		before, _ := a.user(ctx, userID)
+		if first, second := register(), register(); first != 202 || second != 200 {
+			t.Fatalf("refund registration is not idempotent: %d %d", first, second)
+		}
+		held, _ := a.user(ctx, userID)
+		if held.Balance != before.Balance-order.AmountCents*10000 {
+			t.Fatalf("incorrect reservation: %d", held.Balance)
+		}
+		refundID := "wechat-refund-id"
+		gateway.refund = &refunddomestic.Refund{
+			RefundId: &refundID, OutRefundNo: &order.ID, TransactionId: order.TransactionID, OutTradeNo: &order.ID,
+			Status: refunddomestic.STATUS_PROCESSING.Ptr(),
+			Amount: &refunddomestic.Amount{Total: &order.AmountCents, Refund: &order.AmountCents, Currency: core.String("CNY")},
+		}
+		gateway.refundQueryErr = &core.APIError{StatusCode: 404, Code: "RESOURCE_NOT_EXISTS"}
+		a.recoverPaymentRefunds(ctx)
+		if gateway.refundCreates != 1 {
+			t.Fatal("worker did not submit the refund")
+		}
+		gateway.refundQueryErr = nil
+		if _, err := a.db.Exec(ctx, `UPDATE payment_refunds SET next_check_at=now() WHERE order_id=$1`, order.ID); err != nil {
+			t.Fatal(err)
+		}
+		gateway.refund.Status = refunddomestic.STATUS_SUCCESS.Ptr()
+		gateway.refund.SuccessTime = &paidAt
+		a.recoverPaymentRefunds(ctx)
+		if err := a.applyPaymentRefund(ctx, order, gateway.refund); err != nil {
+			t.Fatal(err)
+		}
+		after, _ := a.user(ctx, userID)
+		var amount int64
+		if err := a.db.QueryRow(ctx, `SELECT amount FROM transactions WHERE refund_order_id=$1`, order.ID).Scan(&amount); err != nil ||
+			amount != -order.AmountCents*10000 || after.Balance != held.Balance || gateway.refundCreates != 1 {
+			t.Fatalf("refund did not settle exactly once: amount=%d balance=%d err=%v", amount, after.Balance, err)
+		}
+		const columns = "公众账号ID,商户号,微信订单号,商户订单号,交易状态,货币种类,订单金额,微信退款单号,退款状态,申请退款金额"
+		gateway.bill = fmt.Appendf(nil, "%s\n%s,%s,%s,%s,SUCCESS,CNY,10.00,,,0.00\n%s,%s,%s,%s,REFUND,CNY,10.00,%s,SUCCESS,10.00\n总交易单数,总交易额\n2,10.00\n",
+			columns, order.AppID, order.MchID, *order.TransactionID, order.ID, order.AppID, order.MchID, *order.TransactionID, order.ID, refundID)
+		report, err := a.checkPaymentBill(ctx, billDay)
+		if err != nil || report.Matched != 2 || report.DifferenceCount != 0 {
+			t.Fatalf("payment and refund did not match: %+v %v", report, err)
+		}
+		gateway.bill = bytes.Replace(gateway.bill, []byte("SUCCESS,10.00\n"), []byte("SUCCESS,9.99\n"), 1)
+		report, err = a.checkPaymentBill(ctx, billDay)
+		if err != nil || report.Matched != 1 || report.DifferenceCount != 1 || report.Differences[0].Reason != "amount_or_id_mismatch" {
+			t.Fatalf("amount mismatch not detected: %+v %v", report, err)
+		}
+	})
 	t.Run("pending limit", func(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			create(randomToken())

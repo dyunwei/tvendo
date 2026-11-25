@@ -36,6 +36,8 @@ interface Order {
   email?: string;
   amount_cents: number;
   status: "pending" | "paid" | "closed";
+  refund_status?: keyof typeof refundLabels | null;
+  wechat_refund_id?: string;
   code_url?: string;
   transaction_id: string | null;
   created_at: string;
@@ -120,6 +122,87 @@ const now = ref(Date.now());
 const expired = computed(
   () => active.value && now.value >= Date.parse(active.value.expires_at),
 );
+const refundLabels = {
+  queued: "退款已登记",
+  processing: "退款处理中",
+  abnormal: "退款异常",
+  succeeded: "已原路退款",
+  closed: "退款已关闭",
+};
+const orderToRefund = ref<Order | null>(null);
+const refundReason = ref("");
+const refundError = ref("");
+const refundBusy = ref(false);
+async function submitRefund() {
+  if (!orderToRefund.value || refundBusy.value) return;
+  refundBusy.value = true;
+  refundError.value = "";
+  try {
+    await api(`/api/admin/payments/${orderToRefund.value.id}/refund`, {
+      method: "POST",
+      body: JSON.stringify({ reason: refundReason.value }),
+    });
+    orderToRefund.value = null;
+    await load();
+    emit("paid");
+  } catch (e) {
+    refundError.value = (e as Error).message;
+  } finally {
+    refundBusy.value = false;
+  }
+}
+function openRefund(order: Order) {
+  orderToRefund.value = order;
+  refundReason.value = "";
+  refundError.value = "";
+}
+interface BillEntry {
+  kind: string;
+  order_id: string;
+  wechat_id: string;
+  amount_cents: number;
+}
+interface BillReport {
+  bill_date: string;
+  checked_at: string;
+  matched: number;
+  difference_count: number;
+  differences: { reason: string; local?: BillEntry; wechat?: BillEntry }[];
+}
+const bills = ref<BillReport[]>([]);
+const billDate = ref("");
+const billBusy = ref(false);
+const billError = ref("");
+const billReasons: Record<string, string> = {
+  duplicate_in_wechat: "微信账单重复",
+  missing_locally: "平台缺少记录",
+  ledger_mismatch: "平台流水异常",
+  amount_or_id_mismatch: "金额或交易号不一致",
+  missing_in_wechat: "微信账单缺少记录",
+};
+async function loadBills() {
+  try {
+    bills.value = await api<BillReport[]>("/api/admin/payment-bills");
+  } catch (e) {
+    billError.value = (e as Error).message;
+  }
+}
+async function checkBill() {
+  if (billBusy.value) return;
+  billBusy.value = true;
+  billError.value = "";
+  try {
+    await api("/api/admin/payment-bills", {
+      method: "POST",
+      body: JSON.stringify({ bill_date: billDate.value }),
+    });
+    await loadBills();
+  } catch (e) {
+    billError.value = (e as Error).message;
+  } finally {
+    billBusy.value = false;
+  }
+}
 const labels = { pending: "待支付", paid: "已到账", closed: "已关闭" };
 let timer: ReturnType<typeof setInterval> | undefined;
 let clock: ReturnType<typeof setInterval> | undefined;
@@ -166,7 +249,13 @@ function close() {
   qr.value = "";
   ++qrVersion;
 }
-useEscapeClose(close);
+useEscapeClose(() => {
+  if (orderToRefund.value) {
+    if (!refundBusy.value) orderToRefund.value = null;
+    return;
+  }
+  close();
+});
 async function create() {
   if (busy.value) return;
   busy.value = true;
@@ -224,7 +313,7 @@ async function poll() {
   }
 }
 onMounted(async () => {
-  if (!props.admin) {
+  {
     try {
       const config = await api<{ enabled: boolean; amounts_cents: number[] }>(
         "/api/payments/config",
@@ -235,7 +324,7 @@ onMounted(async () => {
       error.value = (e as Error).message;
     }
   }
-  await load();
+  await Promise.all([load(), props.admin ? loadBills() : undefined]);
   if (disposed) return;
   timer = setInterval(poll, 3000);
   clock = setInterval(() => {
@@ -286,7 +375,7 @@ onUnmounted(() => {
             <th :class="{ 'wallet-money': embedded }">金额</th>
             <th>状态</th>
             <th>创建时间</th>
-            <th v-if="!admin"></th>
+            <th><span v-if="admin">操作</span></th>
           </tr>
         </thead>
         <tbody>
@@ -307,7 +396,10 @@ onUnmounted(() => {
                 :class="
                   embedded ? ['wallet-order-status', order.status] : undefined
                 "
-                >{{ labels[order.status]
+                >{{
+                  order.refund_status
+                    ? refundLabels[order.refund_status]
+                    : labels[order.status]
                 }}{{
                   order.status === "pending" &&
                   Date.now() >= Date.parse(order.expires_at)
@@ -319,14 +411,30 @@ onUnmounted(() => {
             <td :class="{ 'wallet-secondary': embedded }">
               {{ date(order.created_at) }}
             </td>
-            <td v-if="!admin">
+            <td v-if="admin">
+              <button
+                v-if="
+                  enabled && order.status === 'paid' && !order.refund_status
+                "
+                class="btn outline small"
+                @click="openRefund(order)"
+              >
+                申请全额退款
+              </button>
+              <small v-else-if="order.wechat_refund_id"
+                >微信退款号 {{ order.wechat_refund_id }}</small
+              >
+            </td>
+            <td v-else>
               <button class="btn outline small" @click="open(order)">
                 {{ order.status === "pending" ? "查看支付" : "查看订单" }}
               </button>
             </td>
           </tr>
           <tr v-if="!orders.length">
-            <td colspan="5" class="empty-cell">暂无微信支付订单</td>
+            <td :colspan="admin ? 6 : 5" class="empty-cell">
+              暂无微信支付订单
+            </td>
           </tr>
         </tbody>
       </table>
@@ -348,7 +456,104 @@ onUnmounted(() => {
       </p>
     </div>
   </div>
+  <section v-if="admin && (enabled || bills.length)" class="panel">
+    <div class="section-heading">
+      <h3>微信账单对账</h3>
+      <button class="btn outline small" type="button" @click="loadBills">
+        刷新
+      </button>
+    </div>
+    <form v-if="enabled" class="section-heading" @submit.prevent="checkBill">
+      <label
+        >账单日期（北京时间） <input v-model="billDate" type="date" required
+      /></label>
+      <button class="btn outline small" :disabled="billBusy">
+        {{ billBusy ? "对账中…" : "核对账单" }}
+      </button>
+    </form>
+    <p v-if="billError" class="alert error" role="alert">{{ billError }}</p>
+    <PaginatedTable :items="bills" label="账单报告分页" v-slot="{ rows }">
+      <table>
+        <thead>
+          <tr>
+            <th>账单日期</th>
+            <th>匹配</th>
+            <th>差异</th>
+            <th>核对时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="bill in rows" :key="bill.bill_date">
+            <td>{{ bill.bill_date }}</td>
+            <td>{{ bill.matched }}</td>
+            <td>
+              <details v-if="bill.difference_count">
+                <summary>{{ bill.difference_count }} 笔差异</summary>
+                <ul>
+                  <li v-for="(item, index) in bill.differences" :key="index">
+                    {{ billReasons[item.reason] || item.reason }} ·
+                    {{ item.local?.order_id || item.wechat?.order_id }}
+                    <span v-if="item.local">
+                      · 平台 {{ money(item.local.amount_cents * 10000) }} /
+                      {{ item.local.wechat_id }}</span
+                    >
+                    <span v-if="item.wechat">
+                      · 微信 {{ money(item.wechat.amount_cents * 10000) }} /
+                      {{ item.wechat.wechat_id }}</span
+                    >
+                  </li>
+                </ul>
+                <p v-if="bill.difference_count > bill.differences.length">
+                  显示前 {{ bill.differences.length }} 笔差异。
+                </p>
+              </details>
+              <span v-else>无</span>
+            </td>
+            <td>{{ date(bill.checked_at) }}</td>
+          </tr>
+          <tr v-if="!bills.length">
+            <td colspan="4" class="empty-cell">暂无对账记录</td>
+          </tr>
+        </tbody>
+      </table>
+    </PaginatedTable>
+  </section>
   <Teleport to="body">
+    <div v-if="orderToRefund" class="modal-backdrop">
+      <form
+        class="modal topup-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="refund-heading"
+        @submit.prevent="submitRefund"
+      >
+        <h2 id="refund-heading">微信原路退款</h2>
+        <p>
+          {{ orderToRefund.email }} ·
+          {{ money(orderToRefund.amount_cents * 10000) }}
+        </p>
+        <p>提交后会先冻结等额可用余额，微信确认后记入退款流水。</p>
+        <label
+          >退款原因<input v-model="refundReason" required maxlength="80"
+        /></label>
+        <p v-if="refundError" class="alert error" role="alert">
+          {{ refundError }}
+        </p>
+        <div class="modal-actions">
+          <button
+            class="btn outline"
+            type="button"
+            :disabled="refundBusy"
+            @click="orderToRefund = null"
+          >
+            取消
+          </button>
+          <button class="btn danger-btn" :disabled="refundBusy">
+            {{ refundBusy ? "提交中…" : "确认申请全额退款" }}
+          </button>
+        </div>
+      </form>
+    </div>
     <div v-if="choosing" class="modal-backdrop" @click.self="close">
       <form
         class="modal topup-modal"
@@ -461,11 +666,13 @@ onUnmounted(() => {
         </button>
         <h2 id="recharge-title">
           {{
-            active.status === "paid"
-              ? "充值已到账"
-              : active.status === "closed"
-                ? "订单已关闭"
-                : "微信扫码支付"
+            active.refund_status
+              ? refundLabels[active.refund_status]
+              : active.status === "paid"
+                ? "充值已到账"
+                : active.status === "closed"
+                  ? "订单已关闭"
+                  : "微信扫码支付"
           }}
         </h2>
         <strong class="recharge-total">{{
@@ -487,6 +694,14 @@ onUnmounted(() => {
             {{ date(active.expires_at) }}。关闭窗口后仍可从订单列表查看。</small
           >
         </template>
+        <p v-else-if="active.refund_status === 'succeeded'">
+          原订单金额已退回支付账户。
+        </p>
+        <p
+          v-else-if="active.refund_status && active.refund_status !== 'closed'"
+        >
+          等额余额已冻结，等待微信确认。
+        </p>
         <p v-else-if="active.status === 'paid'">
           已计入账户余额，可以继续使用工具。
         </p>

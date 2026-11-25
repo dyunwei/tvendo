@@ -50,6 +50,7 @@ type paymentOrder struct {
 	AmountCents   int64      `json:"amount_cents"`
 	Status        string     `json:"status"`
 	CodeURL       string     `json:"code_url"`
+	RefundStatus  string     `json:"refund_status,omitempty"`
 	TransactionID *string    `json:"transaction_id"`
 	CreatedAt     time.Time  `json:"created_at"`
 	ExpiresAt     time.Time  `json:"expires_at"`
@@ -374,10 +375,18 @@ func (a *App) createPayment(w http.ResponseWriter, r *http.Request, u User) {
 	writeJSON(w, 201, o)
 }
 func (a *App) paymentOrders(w http.ResponseWriter, r *http.Request, u User) {
-	a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT `+paymentColumns+` FROM payment_orders WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100) x`, u.ID)
+	a.rows(w, r, `SELECT row_to_json(x) FROM (
+		SELECT p.id,p.user_id,p.amount_cents,p.status,p.code_url,p.transaction_id,p.created_at,p.expires_at,p.paid_at,
+			r.status AS refund_status
+		FROM payment_orders p LEFT JOIN payment_refunds r ON r.order_id=p.id
+		WHERE p.user_id=$1 ORDER BY p.created_at DESC LIMIT 100) x`, u.ID)
 }
 func (a *App) adminPaymentOrders(w http.ResponseWriter, r *http.Request, u User) {
-	a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT p.id,p.user_id,u.email,p.amount_cents,p.status,p.transaction_id,p.created_at,p.expires_at,p.paid_at FROM payment_orders p JOIN users u ON u.id=p.user_id ORDER BY p.created_at DESC LIMIT 200) x`)
+	a.rows(w, r, `SELECT row_to_json(x) FROM (
+		SELECT p.id,p.user_id,u.email,p.amount_cents,p.status,p.transaction_id,p.created_at,p.expires_at,p.paid_at,
+			r.status AS refund_status,r.wechat_refund_id
+		FROM payment_orders p JOIN users u ON u.id=p.user_id LEFT JOIN payment_refunds r ON r.order_id=p.id
+		ORDER BY p.created_at DESC LIMIT 200) x`)
 }
 func (a *App) getPayment(w http.ResponseWriter, r *http.Request, u User) {
 	o, e := scanPayment(a.db.QueryRow(r.Context(), `SELECT `+paymentColumns+` FROM payment_orders WHERE id=$1 AND user_id=$2`, r.PathValue("id"), u.ID))
@@ -388,6 +397,13 @@ func (a *App) getPayment(w http.ResponseWriter, r *http.Request, u User) {
 	if e != nil {
 		fail(w, 500, "无法读取充值订单")
 		return
+	}
+	if o.Status == "paid" {
+		e = a.db.QueryRow(r.Context(), `SELECT status FROM payment_refunds WHERE order_id=$1`, o.ID).Scan(&o.RefundStatus)
+		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+			fail(w, 500, "无法读取退款状态")
+			return
+		}
 	}
 	writeJSON(w, 200, o)
 }

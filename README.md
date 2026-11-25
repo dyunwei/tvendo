@@ -97,7 +97,7 @@ CLI / API 默认提供关键词检索，可按需接入 Embedding 与 Rerank，�
 
 ## 项目状态
 
-当前支持同步 HTTP / JSON 和远程 MCP 工具调用。工具与供应商凭据由部署管理员配置，不附带现成的付费服务；微信支付及搜索模型均需单独配置。暂不提供异步任务、H5 / JSAPI 同机支付及自动退款。支持范围见 [兼容性](docs/compatibility.md)，测试证据与边界见 [验证记录](docs/verification.md)。
+当前支持同步 HTTP / JSON 和远程 MCP 工具调用。工具与供应商凭据由部署管理员配置，不附带现成的付费服务；微信支付及搜索模型均需单独配置。暂不提供异步任务、H5 / JSAPI 同机支付及部分退款。支持范围见 [兼容性](docs/compatibility.md)，测试证据与边界见 [验证记录](docs/verification.md)。
 
 ## 文档与贡献
 

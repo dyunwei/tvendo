@@ -91,3 +91,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS transactions_payment_order ON transactions(pay
 ALTER TABLE payment_orders
  DROP CONSTRAINT IF EXISTS payment_orders_amount_cents_check,
  ADD CONSTRAINT payment_orders_amount_cents_check CHECK (amount_cents IN (1,1000,5000,10000,20000));
+
+CREATE TABLE IF NOT EXISTS payment_refunds (
+ order_id TEXT PRIMARY KEY REFERENCES payment_orders(id),
+ actor_id BIGINT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','processing','abnormal','succeeded','closed')),
+ wechat_refund_id TEXT UNIQUE,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ succeeded_at TIMESTAMPTZ,
+ next_check_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS payment_refunds_recovery ON payment_refunds(next_check_at)
+ WHERE status IN ('queued','processing','abnormal');
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS refund_order_id TEXT REFERENCES payment_refunds(order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_payment_refund ON transactions(refund_order_id) WHERE refund_order_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS payment_orders_paid_at ON payment_orders(mch_id,appid,paid_at) WHERE status='paid';
+CREATE INDEX IF NOT EXISTS payment_refunds_succeeded_at ON payment_refunds(succeeded_at) WHERE status='succeeded';
+CREATE TABLE IF NOT EXISTS payment_bill_reports (
+ merchant_id TEXT NOT NULL,
+ app_id TEXT NOT NULL,
+ bill_date DATE NOT NULL,
+ checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ matched INT NOT NULL,
+ difference_count INT NOT NULL,
+ differences JSONB NOT NULL,
+ PRIMARY KEY (merchant_id,app_id,bill_date)
+);
