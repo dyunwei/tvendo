@@ -37,6 +37,7 @@ import {
 import Admin from "./Admin.vue";
 import Recharge from "./components/Recharge.vue";
 import { copyText } from "./clipboard";
+import ChangePassword from "./components/ChangePassword.vue";
 import HistoryFilters from "./components/HistoryFilters.vue";
 import HistoryPagination from "./components/HistoryPagination.vue";
 import { useHistory } from "./useHistory";
@@ -84,6 +85,10 @@ const dailyInput = ref(3),
   keyTab = ref("active"),
   creating = ref(false),
   keyLabel = ref(""),
+  keyFormError = ref(""),
+  keyExpiration = ref(""),
+  keyBudget = ref<number | null>(null),
+  keyTools = ref<string[]>([]),
   newKey = ref(""),
   busy = ref(false),
   revokeID = ref<number | null>(null),
@@ -195,13 +200,14 @@ async function load() {
         "resources",
         "usage",
         "wallet",
+        "account",
       ].includes(page.value)
     ) {
       await router.replace("/app");
       return;
     }
     const jobs: Promise<void>[] = [];
-    if (["start", "tools", "resources"].includes(page.value))
+    if (["start", "tools", "resources", "keys"].includes(page.value))
       jobs.push(
         api<Tool[]>("/api/tools").then((d) => {
           tools.value = d;
@@ -266,18 +272,31 @@ async function copy(v: string) {
 }
 async function createKey() {
   busy.value = true;
-  error.value = "";
+  keyFormError.value = "";
   try {
     const d = await api("/api/keys", {
       method: "POST",
-      body: JSON.stringify({ label: keyLabel.value }),
+      body: JSON.stringify({
+        label: keyLabel.value,
+        expires_at: keyExpiration.value
+          ? new Date(keyExpiration.value).toISOString()
+          : undefined,
+        daily_limit_micros:
+          keyBudget.value === null || String(keyBudget.value) === ""
+            ? undefined
+            : Math.round(Number(keyBudget.value) * 1e6),
+        allowed_tools: keyTools.value,
+      }),
     });
     newKey.value = d.key;
     creating.value = false;
     keyLabel.value = "";
+    keyExpiration.value = "";
+    keyBudget.value = null;
+    keyTools.value = [];
     await load();
   } catch (e) {
-    error.value = (e as Error).message;
+    keyFormError.value = (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -441,9 +460,10 @@ const statusLabel = (s: string) =>
             ><ChevronsUpDown :size="15" />
           </button>
           <div v-if="profile" class="profile-popup">
-            <small>{{ session.user?.email }}</small><button @click="logout">
-              <LogOut :size="15" />退出登录
-            </button>
+            <small>{{ session.user?.email }}</small>
+            <button @click="router.push('/app/account')">
+              <KeyRound :size="15" />修改密码</button
+            ><button @click="logout"><LogOut :size="15" />退出登录</button>
           </div>
         </div>
       </div>
@@ -457,7 +477,9 @@ const statusLabel = (s: string) =>
               ? "管理后台"
               : page === "wallet"
                 ? "钱包"
-                : menu.find((x) => x.id === page)?.label
+                : page === "account"
+                  ? "账户设置"
+                  : menu.find((x) => x.id === page)?.label
           }}</span
         ><span class="environment"><i />所有服务由管理员统一配置</span>
       </div>
@@ -478,6 +500,7 @@ const statusLabel = (s: string) =>
           <LoaderCircle :size="15" class="spin" />正在加载…
         </div>
         <Admin v-if="page === 'admin'" />
+        <ChangePassword v-else-if="page === 'account'" />
         <template v-else-if="page === 'start'"
           ><div class="welcome">
             <span class="eyebrow blue">YOUR NEXT IDEA STARTS HERE</span>
@@ -789,8 +812,21 @@ const statusLabel = (s: string) =>
                     <td class="text-dark"><TableText :text="key.label" /></td>
                     <td class="mono">{{ key.prefix }}••••••••</td>
                     <td>
-                      <span class="permission">tools:read</span>
-                      <span class="permission">runs:create</span>
+                      <span class="permission">{{
+                        key.allowed_tools?.length
+                          ? key.allowed_tools.length + " 个工具"
+                          : "全部工具"
+                      }}</span>
+                      <small
+                        v-if="key.daily_limit_micros != null"
+                        class="cell-sub"
+                        >日预算 {{ money(key.daily_limit_micros) }}</small
+                      >
+                      <small v-if="key.expires_at" class="cell-sub">{{
+                        Date.parse(key.expires_at) <= Date.now()
+                          ? "已过期"
+                          : "到期 " + date(key.expires_at)
+                      }}</small>
                     </td>
                     <td>{{ date(key.created_at) }}</td>
                     <td>{{ date(key.last_used) }}</td>
@@ -1316,8 +1352,43 @@ const statusLabel = (s: string) =>
               required
               maxlength="80"
               placeholder="例如：Research Agent"
-              autofocus /></label
-          ><button class="btn dark full" :disabled="busy">
+              autofocus
+          /></label>
+          <label
+            >有效期（选填）
+            <input v-model="keyExpiration" type="datetime-local"
+          /></label>
+          <label
+            >每日预算（元，选填）
+            <input
+              v-model.number="keyBudget"
+              type="number"
+              min="0"
+              max="1000000"
+              step="0.000001"
+          /></label>
+          <label
+            >可用工具（留空允许全部）
+            <select v-model="keyTools" multiple size="5">
+              <optgroup
+                v-for="provider in tools"
+                :key="provider.id"
+                :label="provider.name"
+              >
+                <option
+                  v-for="endpoint in provider.endpoints"
+                  :key="endpoint.id"
+                  :value="endpoint.tool_ref"
+                >
+                  {{ endpoint.name }}
+                </option>
+              </optgroup>
+            </select>
+          </label>
+          <p v-if="keyFormError" class="alert error" role="alert">
+            {{ keyFormError }}
+          </p>
+          <button class="btn dark full" :disabled="busy">
             {{ busy ? "创建中…" : "创建密钥" }}
           </button>
         </form>

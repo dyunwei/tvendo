@@ -5,11 +5,23 @@ CREATE TABLE IF NOT EXISTS users (
  daily_limit BIGINT NOT NULL DEFAULT 3000000, call_limit BIGINT NOT NULL DEFAULT 300000,
  daily_enabled BOOLEAN NOT NULL DEFAULT false, call_enabled BOOLEAN NOT NULL DEFAULT false, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS session_epoch BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS account_tokens (
+ token_hash TEXT PRIMARY KEY, user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ purpose TEXT NOT NULL CHECK (purpose IN ('verify','reset')), expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS account_tokens_user ON account_tokens(user_id,purpose);
+CREATE INDEX IF NOT EXISTS account_tokens_expiry ON account_tokens(expires_at);
 CREATE UNIQUE INDEX IF NOT EXISTS single_admin ON users(role) WHERE role='admin';
 CREATE TABLE IF NOT EXISTS api_keys (
  id BIGSERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id), label TEXT NOT NULL, hash TEXT UNIQUE NOT NULL,
  prefix TEXT NOT NULL, revoked BOOLEAN NOT NULL DEFAULT false, last_used TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_tools TEXT[];
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS daily_limit_micros BIGINT CHECK (daily_limit_micros>=0);
 CREATE TABLE IF NOT EXISTS tools (
  id BIGSERIAL PRIMARY KEY, slug TEXT UNIQUE NOT NULL, name TEXT NOT NULL, category TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '', docs TEXT NOT NULL DEFAULT '',
@@ -40,6 +52,7 @@ ALTER TABLE tools ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
 
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS key_id BIGINT REFERENCES api_keys(id);
+CREATE INDEX IF NOT EXISTS usage_key_time ON usage(key_id,created_at) WHERE key_id IS NOT NULL;
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS key_label TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS usage_user_request ON usage(user_id, request_id);
 

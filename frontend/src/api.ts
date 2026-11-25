@@ -8,6 +8,7 @@ export interface User {
   balance: number;
 }
 export interface Endpoint {
+  tool_ref?: string;
   mcp_name?: string;
   input_schema?: unknown;
   disabled?: boolean;

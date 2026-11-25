@@ -731,5 +731,78 @@ func TestIntegrationBilling(t *testing.T) {
 			t.Fatalf("manual charge did not settle the reservation: balance=%d entries=%d error=%v", balance, entries, err)
 		}
 	})
+	t.Run("account recovery and scoped API key", func(t *testing.T) {
+		var token string
+		a.mailer = func(_ context.Context, _, _, message string) error {
+			_, fragment, _ := strings.Cut(message, "#")
+			token = strings.TrimSpace(fragment)
+			return nil
+		}
+		defer func() { a.mailer = nil }()
+		const email = "recovery@test.local"
+		const oldPassword = "initial-account-password"
+		const newPassword = "replacement-account-password"
+		credentials := map[string]string{"email": email, "password": oldPassword, "name": "Recovery"}
+		code, out, _ := request("POST", "/api/auth/register", credentials, nil, "", "")
+		if code != 202 || out["verification_required"] != true || len(token) != 64 {
+			t.Fatalf("verification was not issued: %d %v", code, out)
+		}
+		code, out, _ = request("POST", "/api/auth/login", credentials, nil, "", "")
+		require(code, 403, out)
+		code, out, _ = request("POST", "/api/auth/verify", map[string]string{"token": token}, nil, "", "")
+		require(code, 200, out)
+		code, out, _ = request("POST", "/api/auth/verify", map[string]string{"token": token}, nil, "", "")
+		require(code, 400, out)
+		code, out, signedIn := request("POST", "/api/auth/login", credentials, nil, "", "")
+		require(code, 200, out)
+		accountID := int64(out["user"].(map[string]any)["id"].(float64))
+		code, out, _ = request("POST", "/api/auth/reset/request", map[string]string{"email": email}, nil, "", "")
+		require(code, 202, out)
+		code, out, _ = request("POST", "/api/auth/reset", map[string]string{"token": token, "password": newPassword}, nil, "", "")
+		require(code, 200, out)
+		code, out, _ = request("GET", "/api/auth/me", nil, signedIn[0], "", "")
+		require(code, 401, out)
+		credentials["password"] = newPassword
+		code, out, signedIn = request("POST", "/api/auth/login", credentials, nil, "", "")
+		require(code, 200, out)
+		accountCSRF := out["csrf"].(string)
+		code, out, _ = request("POST", "/api/admin/topup", map[string]any{"user_id": accountID, "amount": 2000000}, adminCookie, adminCSRF, "")
+		require(code, 200, out)
+		scoped := map[string]any{"label": "scoped", "allowed_tools": []string{toolRef(testProviderID, "ok")}, "daily_limit_micros": 1000000}
+		code, out, _ = request("POST", "/api/keys", scoped, signedIn[0], accountCSRF, "")
+		require(code, 201, out)
+		key := out["key"].(string)
+		keyID := int64(out["id"].(float64))
+		code, out, _ = request("GET", "/v1/catalog", nil, nil, "", key)
+		if code != 200 || len(out["data"].(map[string]any)["items"].([]any)) != 1 {
+			t.Fatalf("catalog ignored allowlist: %d %v", code, out)
+		}
+		code, out, _ = request("POST", "/v1/run", runBody("fail"), nil, "", key)
+		if code != 403 || out["code"] != "KEY_TOOL_DENIED" {
+			t.Fatalf("restricted tool allowed: %d %v", code, out)
+		}
+		code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", key)
+		require(code, 200, out)
+		code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", key)
+		if code != 403 || out["code"] != "KEY_BUDGET_EXCEEDED" {
+			t.Fatalf("key budget not enforced: %d %v", code, out)
+		}
+		disablePath := fmt.Sprintf("/api/admin/users/%d/disabled", accountID)
+		code, out, _ = request("PUT", disablePath, map[string]bool{"disabled": true}, adminCookie, adminCSRF, "")
+		require(code, 200, out)
+		code, out, _ = request("GET", "/api/auth/me", nil, signedIn[0], "", "")
+		require(code, 401, out)
+		code, out, _ = request("GET", "/v1/balance", nil, nil, "", key)
+		require(code, 401, out)
+		code, out, _ = request("PUT", disablePath, map[string]bool{"disabled": false}, adminCookie, adminCSRF, "")
+		require(code, 200, out)
+		code, out, _ = request("GET", "/v1/balance", nil, nil, "", key)
+		require(code, 200, out)
+		if _, e := db.Exec(ctx, `UPDATE api_keys SET expires_at=now() WHERE id=$1`, keyID); e != nil {
+			t.Fatal(e)
+		}
+		code, out, _ = request("GET", "/v1/balance", nil, nil, "", key)
+		require(code, 401, out)
+	})
 	t.Run("WeChat payments", func(t *testing.T) { exercisePayments(t, a, userCookie, userCSRF, userID) })
 }

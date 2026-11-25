@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowRight, Eye, EyeOff, LoaderCircle, Check } from "lucide-vue-next";
 import { api, session } from "./api";
@@ -11,7 +11,16 @@ const name = ref(""),
   password = ref(""),
   show = ref(false),
   busy = ref(false),
-  error = ref("");
+  error = ref(""),
+  verificationRequired = ref(false),
+  emailEnabled = ref(false);
+onMounted(async () => {
+  try {
+    emailEnabled.value = (await api("/api/auth/config")).email_enabled;
+  } catch {
+    emailEnabled.value = false;
+  }
+});
 async function submit() {
   busy.value = true;
   error.value = "";
@@ -27,6 +36,11 @@ async function submit() {
         }),
       },
     );
+    if (d.verification_required) {
+      verificationRequired.value = true;
+      password.value = "";
+      return;
+    }
     session.user = d.user;
     session.csrf = d.csrf;
     const next = String(route.query.next || "/app");
@@ -73,6 +87,13 @@ async function submit() {
             register ? "连接工具，从这里开始。" : "登录账户，继续你的下一步。"
           }}
         </p>
+        <div
+          v-if="verificationRequired && register"
+          class="alert success"
+          role="status"
+        >
+          请打开邮件中的验证链接，再登录。
+        </div>
         <div v-if="error" class="alert error" role="alert">{{ error }}</div>
         <label v-if="register"
           >姓名<input
@@ -117,7 +138,18 @@ async function submit() {
             >{{ register ? "登录" : "立即注册" }} <ArrowRight :size="13"
           /></RouterLink>
         </p>
-        <div class="auth-help">账户问题或密码重置，请联系平台管理员。</div>
+        <div v-if="emailEnabled" class="auth-help">
+          <RouterLink :to="{ path: '/reset-password', query: { email } }"
+            >忘记密码</RouterLink
+          >
+          ·
+          <RouterLink :to="{ path: '/verify-email', query: { email } }"
+            >重新发送验证邮件</RouterLink
+          >
+        </div>
+        <div v-else class="auth-help">
+          账户问题或密码重置，请联系平台管理员。
+        </div>
       </form>
     </div>
   </main>

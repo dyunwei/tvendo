@@ -46,26 +46,35 @@ type App struct {
 	search            *catalogSearch
 	searchFallbackRef string
 	trustedProxies    []netip.Prefix
+	mailer            accountMailer
+	mailSlots         chan struct{}
 }
 type User struct {
-	KeyID        int64  `json:"-"`
-	KeyLabel     string `json:"-"`
-	Currency     string `json:"currency"`
-	ID           int64  `json:"id"`
-	Email        string `json:"email"`
-	Name         string `json:"name"`
-	Role         string `json:"role"`
-	Balance      int64  `json:"balance"`
-	DailyLimit   int64  `json:"daily_limit"`
-	CallLimit    int64  `json:"call_limit"`
-	DailyEnabled bool   `json:"daily_enabled"`
-	CallEnabled  bool   `json:"call_enabled"`
+	KeyID         int64    `json:"-"`
+	KeyLabel      string   `json:"-"`
+	KeyTools      []string `json:"-"`
+	KeyDailyLimit *int64   `json:"-"`
+	SessionEpoch  int64    `json:"-"`
+	Disabled      bool     `json:"disabled"`
+	EmailVerified bool     `json:"email_verified"`
+	Currency      string   `json:"currency"`
+	ID            int64    `json:"id"`
+	Email         string   `json:"email"`
+	Name          string   `json:"name"`
+	Role          string   `json:"role"`
+	Balance       int64    `json:"balance"`
+	DailyLimit    int64    `json:"daily_limit"`
+	CallLimit     int64    `json:"call_limit"`
+	DailyEnabled  bool     `json:"daily_enabled"`
+	CallEnabled   bool     `json:"call_enabled"`
 }
 type Session struct {
 	UserID int64  `json:"user_id"`
 	CSRF   string `json:"csrf"`
+	Epoch  int64  `json:"epoch"`
 }
 type Endpoint struct {
+	ToolRef           string          `json:"tool_ref,omitempty"`
 	MCPName           string          `json:"mcp_name,omitempty"`
 	InputSchema       json.RawMessage `json:"input_schema,omitempty"`
 	Disabled          bool            `json:"disabled,omitempty"`
@@ -163,7 +172,7 @@ func (a *App) decrypt(s string) (string, error) {
 }
 func (a *App) user(ctx context.Context, id int64) (User, error) {
 	var u User
-	e := a.db.QueryRow(ctx, `SELECT id,email,name,role,balance,daily_limit,call_limit,daily_enabled,call_enabled FROM users WHERE id=$1`, id).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Balance, &u.DailyLimit, &u.CallLimit, &u.DailyEnabled, &u.CallEnabled)
+	e := a.db.QueryRow(ctx, `SELECT id,email,name,role,balance,daily_limit,call_limit,daily_enabled,call_enabled,disabled,email_verified,session_epoch FROM users WHERE id=$1`, id).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.Balance, &u.DailyLimit, &u.CallLimit, &u.DailyEnabled, &u.CallEnabled, &u.Disabled, &u.EmailVerified, &u.SessionEpoch)
 	u.Currency = billing.Currency
 	return u, e
 }
@@ -188,7 +197,7 @@ func (a *App) withUser(admin bool, next func(http.ResponseWriter, *http.Request,
 			return
 		}
 		u, e := a.user(r.Context(), s.UserID)
-		if e != nil {
+		if e != nil || u.Disabled || !u.EmailVerified || u.SessionEpoch != s.Epoch {
 			fail(w, 401, "登录已失效")
 			return
 		}
@@ -205,7 +214,7 @@ func (a *App) withUser(admin bool, next func(http.ResponseWriter, *http.Request,
 }
 func (a *App) newSession(w http.ResponseWriter, r *http.Request, u User) {
 	token := randomToken()
-	s := Session{u.ID, randomToken()}
+	s := Session{UserID: u.ID, CSRF: randomToken(), Epoch: u.SessionEpoch}
 	b, _ := json.Marshal(s)
 	if e := a.redis.Set(r.Context(), "session:"+hash(token), b, 7*24*time.Hour).Err(); e != nil {
 		fail(w, 503, "会话服务暂不可用")
@@ -226,13 +235,15 @@ func (a *App) auth(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	b.Email = strings.ToLower(strings.TrimSpace(b.Email))
-	if len(b.Email) > 254 || !strings.Contains(b.Email, "@") || len(b.Password) < 10 || len(b.Password) > 72 {
+	address, valid := emailAddress(b.Email)
+	b.Email = address
+	if !valid || len(b.Password) < 10 || len(b.Password) > 72 {
 		fail(w, 400, "请输入有效邮箱，密码长度需为 10–72 字节")
 		return
 	}
-	var id int64
-	if r.URL.Path == "/api/auth/register" {
+	var id, epoch int64
+	register := r.URL.Path == "/api/auth/register"
+	if register {
 		b.Name = strings.TrimSpace(b.Name)
 		if len(b.Name) < 1 || len(b.Name) > 80 {
 			fail(w, 400, "请填写姓名（最多 80 字节）")
@@ -243,14 +254,14 @@ func (a *App) auth(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "注册失败")
 			return
 		}
-		e = a.db.QueryRow(r.Context(), `INSERT INTO users(email,name,password) VALUES($1,$2,$3) ON CONFLICT(email) DO NOTHING RETURNING id`, b.Email, b.Name, string(pw)).Scan(&id)
+		e = a.db.QueryRow(r.Context(), `INSERT INTO users(email,name,password,email_verified) VALUES($1,$2,$3,$4) ON CONFLICT(email) DO NOTHING RETURNING id`, b.Email, b.Name, string(pw), a.mailer == nil).Scan(&id)
 		if e != nil {
 			fail(w, 409, "该邮箱无法注册，请尝试登录")
 			return
 		}
 	} else {
 		var pw string
-		e := a.db.QueryRow(r.Context(), `SELECT id,password FROM users WHERE email=$1`, b.Email).Scan(&id, &pw)
+		e := a.db.QueryRow(r.Context(), `SELECT id,password,session_epoch FROM users WHERE email=$1`, b.Email).Scan(&id, &pw, &epoch)
 		if e != nil {
 			pw = "$2a$10$7EqJtq98hPqEX7fNZaFWoO5S7HNlL9s6pVg0PiIsWMi4c9P0M0uRK"
 		}
@@ -263,6 +274,19 @@ func (a *App) auth(w http.ResponseWriter, r *http.Request) {
 	u, e := a.user(r.Context(), id)
 	if e != nil {
 		fail(w, 500, "读取用户失败")
+		return
+	}
+	if u.Disabled || u.SessionEpoch != epoch {
+		fail(w, 403, "账户不可用，请重新登录或联系管理员")
+		return
+	}
+	if !u.EmailVerified {
+		if register {
+			a.queueAccountLink(r.Context(), u.ID, u.Email, "verify")
+			writeJSON(w, 202, map[string]bool{"verification_required": true})
+			return
+		}
+		fail(w, 403, "请先通过邮件链接验证邮箱")
 		return
 	}
 	a.newSession(w, r, u)
@@ -290,7 +314,7 @@ func (a *App) rows(w http.ResponseWriter, r *http.Request, q string, args ...any
 	}
 	writeJSON(w, 200, out)
 }
-func (a *App) listTools(w http.ResponseWriter, r *http.Request, admin bool) {
+func (a *App) listTools(w http.ResponseWriter, r *http.Request, admin bool, key User) {
 	q := `SELECT to_jsonb(t) FROM tools t`
 	if !admin {
 		q += ` WHERE enabled=true`
@@ -313,17 +337,21 @@ func (a *App) listTools(w http.ResponseWriter, r *http.Request, admin bool) {
 		t.HasSecret = t.Secret != nil && *t.Secret != ""
 		t.Secret = nil
 		for i := range t.Endpoints {
+			t.Endpoints[i].ToolRef = toolRef(t.ID, t.Endpoints[i].ID)
 			t.Endpoints[i].Parameters = endpointExample(t, t.Endpoints[i])
 		}
 		if !admin {
 			visible := []Endpoint{}
 			for _, ep := range t.Endpoints {
-				if !ep.Disabled && !ep.Missing {
+				if !ep.Disabled && !ep.Missing && key.allowsTool(toolRef(t.ID, ep.ID)) {
 					ep.Price = effectivePrice(t, ep)
 					visible = append(visible, ep)
 				}
 			}
 			t.Endpoints = visible
+			if len(key.KeyTools) > 0 && len(visible) == 0 {
+				continue
+			}
 			t.BaseURL = ""
 			t.AuthHeader = ""
 			t.AuthPrefix = ""
@@ -492,10 +520,13 @@ func (a *App) saveTool(w http.ResponseWriter, r *http.Request, u User) {
 func (a *App) keys(w http.ResponseWriter, r *http.Request, u User) {
 	switch r.Method {
 	case "GET":
-		a.rows(w, r, `SELECT row_to_json(k) FROM (SELECT id,label,prefix,revoked,last_used,created_at FROM api_keys WHERE user_id=$1 ORDER BY id DESC) k`, u.ID)
+		a.rows(w, r, `SELECT row_to_json(k) FROM (SELECT id,label,prefix,revoked,last_used,created_at,expires_at,allowed_tools,daily_limit_micros FROM api_keys WHERE user_id=$1 ORDER BY id DESC) k`, u.ID)
 	case "POST":
 		var b struct {
-			Label string `json:"label"`
+			Label        string     `json:"label"`
+			ExpiresAt    *time.Time `json:"expires_at"`
+			AllowedTools []string   `json:"allowed_tools"`
+			DailyLimit   *int64     `json:"daily_limit_micros"`
 		}
 		if !decode(w, r, &b) {
 			return
@@ -505,9 +536,29 @@ func (a *App) keys(w http.ResponseWriter, r *http.Request, u User) {
 			fail(w, 400, "请输入 1–80 字节的名称")
 			return
 		}
+		if b.ExpiresAt != nil && !b.ExpiresAt.After(time.Now()) {
+			fail(w, 400, "密钥有效期必须在将来")
+			return
+		}
+		if b.DailyLimit != nil && (*b.DailyLimit < 0 || *b.DailyLimit > 1000000000000) {
+			fail(w, 400, "密钥日预算无效")
+			return
+		}
+		if len(b.AllowedTools) > 200 {
+			fail(w, 400, "每把密钥最多指定 200 个工具")
+			return
+		}
+		seen := make(map[string]bool, len(b.AllowedTools))
+		for _, ref := range b.AllowedTools {
+			if _, _, err := parseToolRef(ref); err != nil || len(ref) > 512 || seen[ref] {
+				fail(w, 400, "工具权限包含无效或重复的工具引用")
+				return
+			}
+			seen[ref] = true
+		}
 		token := "tv_live_" + randomToken()
 		var id int64
-		e := a.db.QueryRow(r.Context(), `INSERT INTO api_keys(user_id,label,hash,prefix) VALUES($1,$2,$3,$4) RETURNING id`, u.ID, b.Label, hash(token), token[:16]).Scan(&id)
+		e := a.db.QueryRow(r.Context(), `INSERT INTO api_keys(user_id,label,hash,prefix,expires_at,allowed_tools,daily_limit_micros) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`, u.ID, b.Label, hash(token), token[:16], b.ExpiresAt, b.AllowedTools, b.DailyLimit).Scan(&id)
 		if e != nil {
 			fail(w, 500, "创建失败")
 			return
@@ -623,18 +674,22 @@ func (a *App) apiUser(w http.ResponseWriter, r *http.Request) (User, bool) {
 	}
 	var id, keyID int64
 	var keyLabel string
-	e := a.db.QueryRow(r.Context(), `SELECT user_id,id,label FROM api_keys WHERE hash=$1 AND revoked=false`, hash(token)).Scan(&id, &keyID, &keyLabel)
+	var keyTools []string
+	var keyDailyLimit *int64
+	e := a.db.QueryRow(r.Context(), `SELECT user_id,id,label,allowed_tools,daily_limit_micros FROM api_keys
+		WHERE hash=$1 AND revoked=false AND (expires_at IS NULL OR expires_at>now())`, hash(token)).
+		Scan(&id, &keyID, &keyLabel, &keyTools, &keyDailyLimit)
 	if e != nil {
 		fail(w, 401, "API Key 无效或已撤销")
 		return u, false
 	}
 	u, e = a.user(r.Context(), id)
-	if e != nil {
-		fail(w, 401, "用户不存在")
+	if e != nil || u.Disabled || !u.EmailVerified {
+		fail(w, 401, "账户不可用")
 		return u, false
 	}
 	_, _ = a.db.Exec(r.Context(), `UPDATE api_keys SET last_used=now() WHERE id=$1`, keyID)
-	u.KeyID, u.KeyLabel = keyID, keyLabel
+	u.KeyID, u.KeyLabel, u.KeyTools, u.KeyDailyLimit = keyID, keyLabel, keyTools, keyDailyLimit
 	return u, true
 }
 func (a *App) run(w http.ResponseWriter, r *http.Request) {
@@ -698,7 +753,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		}
 		input, _ := json.Marshal(b)
 		fingerprint = hash(string(input))
-		if a.replayRun(w, r, a.db, u.ID, idempotencyKey, fingerprint, requestID) {
+		if a.replayRun(w, r, a.db, u, idempotencyKey, fingerprint, requestID) {
 			return
 		}
 	}
@@ -737,6 +792,10 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	}
 	if ep.ID == "" || ep.Disabled || ep.Missing {
 		fail(w, 404, "接口不存在")
+		return
+	}
+	if !u.allowsTool(toolRef(provider.ID, ep.ID)) {
+		agentError(w, 403, "KEY_TOOL_DENIED", "API Key 没有该工具的调用权限", "not_started", 0, requestID)
 		return
 	}
 	ep.Price = effectivePrice(provider, ep)
@@ -787,13 +846,32 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	}
 	defer tx.Rollback(r.Context())
 	var bal, daily, call int64
-	var de, ce bool
-	e = tx.QueryRow(r.Context(), `SELECT balance,daily_limit,call_limit,daily_enabled,call_enabled FROM users WHERE id=$1 FOR UPDATE`, u.ID).Scan(&bal, &daily, &call, &de, &ce)
+	var de, ce, disabled, verified bool
+	var epoch int64
+	e = tx.QueryRow(r.Context(), `SELECT balance,daily_limit,call_limit,daily_enabled,call_enabled,disabled,email_verified,session_epoch
+		FROM users WHERE id=$1 FOR UPDATE`, u.ID).Scan(&bal, &daily, &call, &de, &ce, &disabled, &verified, &epoch)
 	if e != nil {
 		fail(w, 500, "无法读取余额")
 		return
 	}
-	if idempotencyKey != "" && a.replayRun(w, r, tx, u.ID, idempotencyKey, fingerprint, requestID) {
+	if disabled || !verified || u.KeyID == 0 && epoch != u.SessionEpoch {
+		fail(w, 401, "账户不可用或登录已失效")
+		return
+	}
+	if u.KeyID != 0 {
+		var keyID int64
+		e = tx.QueryRow(r.Context(), `SELECT id FROM api_keys WHERE id=$1 AND NOT revoked
+			AND (expires_at IS NULL OR expires_at>now()) FOR SHARE`, u.KeyID).Scan(&keyID)
+		if errors.Is(e, pgx.ErrNoRows) {
+			fail(w, 401, "API Key 无效、已过期或已撤销")
+			return
+		}
+		if e != nil {
+			fail(w, 503, "暂时无法核对 API Key 状态")
+			return
+		}
+	}
+	if idempotencyKey != "" && a.replayRun(w, r, tx, u, idempotencyKey, fingerprint, requestID) {
 		return
 	}
 	var spent int64
@@ -809,6 +887,19 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	if ce && ep.Price > call || de && spent+ep.Price > daily {
 		agentError(w, 403, "BUDGET_EXCEEDED", "调用超出预算限制", "not_started", 0, requestID)
 		return
+	}
+	if u.KeyDailyLimit != nil {
+		var keySpent int64
+		e = tx.QueryRow(r.Context(), `SELECT COALESCE(sum(cost),0) FROM usage WHERE key_id=$1
+			AND status IN ('success','running','unknown') AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.KeyID).Scan(&keySpent)
+		if e != nil {
+			fail(w, 503, "暂时无法读取 API Key 预算")
+			return
+		}
+		if keySpent+ep.Price > *u.KeyDailyLimit {
+			agentError(w, 403, "KEY_BUDGET_EXCEEDED", "调用超出 API Key 每日预算", "not_started", 0, requestID)
+			return
+		}
 	}
 	var runID int64
 	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id,key_id,key_label,idempotency_key,request_fingerprint) VALUES($1,$2,$3,$4,$5,NULLIF($6::bigint,0),$7,NULLIF($8,''),NULLIF($9,'')) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID, u.KeyID, u.KeyLabel, idempotencyKey, fingerprint).Scan(&runID)
@@ -963,6 +1054,12 @@ func (a *App) routes() http.Handler {
 	})
 	m.HandleFunc("POST /api/auth/register", a.auth)
 	m.HandleFunc("POST /api/auth/login", a.auth)
+	m.HandleFunc("GET /api/auth/config", a.accountMailConfig)
+	m.HandleFunc("POST /api/auth/verify/request", a.requestAccountLink("verify"))
+	m.HandleFunc("POST /api/auth/verify", a.consumeAccountLink("verify"))
+	m.HandleFunc("POST /api/auth/reset/request", a.requestAccountLink("reset"))
+	m.HandleFunc("POST /api/auth/reset", a.consumeAccountLink("reset"))
+	m.HandleFunc("POST /api/auth/password", a.withUser(false, a.changePassword))
 	m.HandleFunc("GET /api/auth/me", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
 		s, _ := a.session(r)
 		writeJSON(w, 200, map[string]any{"user": u, "csrf": s.CSRF})
@@ -976,7 +1073,7 @@ func (a *App) routes() http.Handler {
 		http.SetCookie(w, &http.Cookie{Name: "tv_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode})
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	}))
-	m.HandleFunc("GET /api/tools", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, false) }))
+	m.HandleFunc("GET /api/tools", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, false, u) }))
 	m.HandleFunc("POST /api/run", a.withUser(false, a.runAsUser))
 	m.HandleFunc("GET /api/keys", a.withUser(false, a.keys))
 	m.HandleFunc("POST /api/keys", a.withUser(false, a.keys))
@@ -987,10 +1084,11 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /api/transactions", a.withUser(false, a.transactionHistory))
 	m.HandleFunc("POST /api/admin/tools/{id}/sync", a.withUser(true, a.syncMCP))
 	m.HandleFunc("POST /api/admin/tools/{id}/bulk", a.withUser(true, a.bulkMCP))
-	m.HandleFunc("GET /api/admin/tools", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, true) }))
+	m.HandleFunc("GET /api/admin/tools", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, true, u) }))
 	m.HandleFunc("POST /api/admin/tools", a.withUser(true, a.saveTool))
+	m.HandleFunc("PUT /api/admin/users/{id}/disabled", a.withUser(true, a.setUserDisabled))
 	m.HandleFunc("GET /api/admin/users", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
-		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,name,email,role,balance,created_at FROM users ORDER BY id DESC LIMIT 1000) x`)
+		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,name,email,role,balance,disabled,email_verified,created_at FROM users ORDER BY id DESC LIMIT 1000) x`)
 	}))
 	m.HandleFunc("GET /api/payments/config", a.withUser(false, a.paymentConfig))
 	m.HandleFunc("POST /api/payments/orders", a.paymentOrderRequest(a.withUser(false, a.createPayment)))
@@ -1007,8 +1105,8 @@ func (a *App) routes() http.Handler {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT a.id,a.action,a.target_id,a.created_at,u.email AS actor FROM audit_log a JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 200) x`)
 	}))
 	m.HandleFunc("GET /v1/tools", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := a.apiUser(w, r); ok {
-			a.listTools(w, r, false)
+		if u, ok := a.apiUser(w, r); ok {
+			a.listTools(w, r, false, u)
 		}
 	})
 	m.HandleFunc("POST /v1/run", a.run)
@@ -1090,6 +1188,13 @@ func main() {
 		log.Fatal(e)
 	}
 	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
+	a.mailer, e = configuredAccountMailer(a.publicURL)
+	if e != nil {
+		log.Fatal(e)
+	}
+	if a.mailer != nil {
+		a.mailSlots = make(chan struct{}, 16)
+	}
 	a.trustedProxies, e = parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
 	if e != nil {
 		log.Fatal(e)
@@ -1128,6 +1233,7 @@ func main() {
 			case <-ticker.C:
 				a.recoverRuns(ctx)
 				a.purgeRunResults(ctx)
+				a.purgeAccountTokens(ctx)
 			}
 		}
 	}()

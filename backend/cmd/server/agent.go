@@ -91,6 +91,15 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 500, "无法读取工具目录")
 		return
 	}
+	if len(u.KeyTools) > 0 {
+		visible := docs[:0]
+		for _, d := range docs {
+			if u.allowsTool(d.item.Ref) {
+				visible = append(visible, d)
+			}
+		}
+		docs = visible
+	}
 	if ref != "" {
 		for _, d := range docs {
 			if d.item.Ref == ref {
@@ -145,7 +154,7 @@ func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, "请求标识无效")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,error_code,error_message,resolution_note,resolved_at,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
+	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,error_code,error_message,resolution_note,resolved_at,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) AND ($7::bigint=0 OR key_id=$7) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency, u.runKeyScope())
 	if err != nil {
 		fail(w, 500, "无法读取调用记录")
 		return

@@ -77,6 +77,29 @@ const shownTools = computed(() =>
       .includes(search.value.toLowerCase()),
   ),
 );
+async function toggleUser(u: { id: number; disabled: boolean; email: string }) {
+  const next = !u.disabled;
+  if (
+    !window.confirm(
+      next
+        ? `停用 ${u.email}？该账户会立即退出，API Key 将暂停使用。`
+        : `恢复 ${u.email} 的访问？`,
+    )
+  )
+    return;
+  busy.value = true;
+  try {
+    await api(`/api/admin/users/${u.id}/disabled`, {
+      method: "PUT",
+      body: JSON.stringify({ disabled: next }),
+    });
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    busy.value = false;
+  }
+}
 async function load() {
   loading.value = true;
   error.value = "";
@@ -328,6 +351,10 @@ function downloadExample() {
                     :class="{ 'blue-badge': u.role === 'admin' }"
                     >{{ u.role === "admin" ? "管理员" : "用户" }}</span
                   >
+                  <small v-if="u.disabled" class="cell-sub">已停用</small>
+                  <small v-else-if="u.email_verified === false" class="cell-sub"
+                    >邮箱待验证</small
+                  >
                 </td>
                 <td class="text-dark mono">{{ money(u.balance) }}</td>
                 <td>{{ date(u.created_at) }}</td>
@@ -341,6 +368,14 @@ function downloadExample() {
                     "
                   >
                     <Plus :size="14" />充值
+                  </button>
+                  <button
+                    v-if="u.role !== 'admin'"
+                    class="btn outline small"
+                    :disabled="busy"
+                    @click="toggleUser(u)"
+                  >
+                    {{ u.disabled ? "恢复" : "停用" }}
                   </button>
                 </td>
               </tr>

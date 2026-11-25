@@ -18,19 +18,23 @@ type runQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-func (a *App) replayRun(w http.ResponseWriter, r *http.Request, db runQuerier, userID int64, key, fingerprint, requestID string) bool {
-	var runID, cost int64
+func (a *App) replayRun(w http.ResponseWriter, r *http.Request, db runQuerier, user User, key, fingerprint, requestID string) bool {
+	var runID, cost, runKeyID int64
 	var originalRequestID, originalFingerprint, state, message, encrypted string
 	err := db.QueryRow(r.Context(), `
-		SELECT u.id,u.cost,u.request_id,u.request_fingerprint,u.status,u.error_message,COALESCE(rr.encrypted_data,'')
+		SELECT u.id,u.cost,u.request_id,u.request_fingerprint,u.status,u.error_message,COALESCE(rr.encrypted_data,''),COALESCE(u.key_id,0)
 		FROM usage u LEFT JOIN run_results rr ON rr.run_id=u.id AND rr.expires_at>now()
-		WHERE u.user_id=$1 AND u.idempotency_key=$2`, userID, key).
-		Scan(&runID, &cost, &originalRequestID, &originalFingerprint, &state, &message, &encrypted)
+		WHERE u.user_id=$1 AND u.idempotency_key=$2`, user.ID, key).
+		Scan(&runID, &cost, &originalRequestID, &originalFingerprint, &state, &message, &encrypted, &runKeyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false
 	}
 	if err != nil {
 		agentError(w, 503, "RUN_LOOKUP_FAILED", "无法确认调用是否已执行，请查询调用记录", "unknown", 0, requestID)
+		return true
+	}
+	if scope := user.runKeyScope(); scope != 0 && scope != runKeyID {
+		agentError(w, 409, "IDEMPOTENCY_CONFLICT", "此 API Key 无法访问该幂等调用", "not_started", 0, requestID)
 		return true
 	}
 	if originalFingerprint != fingerprint {
@@ -84,7 +88,7 @@ func (a *App) getRunResult(w http.ResponseWriter, r *http.Request, u User) {
 	err = a.db.QueryRow(r.Context(), `
 		SELECT u.cost,u.request_id,u.status,COALESCE(rr.encrypted_data,'')
 		FROM usage u LEFT JOIN run_results rr ON rr.run_id=u.id AND rr.expires_at>now()
-		WHERE u.id=$1 AND u.user_id=$2`, runID, u.ID).Scan(&cost, &requestID, &state, &encrypted)
+		WHERE u.id=$1 AND u.user_id=$2 AND ($3::bigint=0 OR u.key_id=$3)`, runID, u.ID, u.runKeyScope()).Scan(&cost, &requestID, &state, &encrypted)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 404, "调用记录不存在")
 		return

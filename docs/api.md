@@ -97,3 +97,5 @@ HTTP 错误保留字符串 `error`；费用相关错误增加 code、settlement�
 `GET /api/usage` 和 `GET /api/transactions` 使用登录会话。调用记录支持按 `status` 筛选，资金流水支持按 `kind` 筛选。两个接口都接受 RFC 3339 的 `from`（包含）和 `before`（不包含）时间边界。指定筛选条件或 `limit` 即返回 `{items,next_cursor}`，`limit` 范围 1–50，默认 25。要查询下一页，沿用筛选条件并传入 `cursor`。无参数的旧接口仍返回最近 200 条数组。
 
 使用 `format=csv` 导出所有符合条件且有权查看的记录，不传分页参数。CSV 金额为整数微元。管理员的调用记录可包含所有账户，资金流水仅可查看当前登录账户。
+
+创建 API Key 时可选 `expires_at`（RFC 3339）、`allowed_tools`（最多 200 个目录的 `tool_ref`）和 `daily_limit_micros`。空权限列表允许全部工具，独立日预算与账户预算同时生效并在 UTC 00:00 重置。限定工具的 Key 仅能发现和调用这些端点，也只能查看自己执行过的运行记录。密钥过期时返回 401，工具权限或密钥预算拦截分别返回 `KEY_TOOL_DENIED`、`KEY_BUDGET_EXCEEDED`。

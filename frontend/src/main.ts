@@ -4,6 +4,7 @@ import App from "./App.vue";
 import Landing from "./Landing.vue";
 import Docs from "./Docs.vue";
 import Auth from "./Auth.vue";
+import AccountRecovery from "./AccountRecovery.vue";
 import Console from "./Console.vue";
 import { session, refreshSession } from "./api";
 import "./style.css";
@@ -15,6 +16,8 @@ const router = createRouter({
     { path: "/docs", component: Docs },
     { path: "/login", component: Auth },
     { path: "/register", component: Auth },
+    { path: "/verify-email", component: AccountRecovery },
+    { path: "/reset-password", component: AccountRecovery },
     { path: "/app/:page?", component: Console },
     { path: "/app/tools/:slug", component: Console },
     { path: "/admin/:section?", component: Console },
