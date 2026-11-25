@@ -37,6 +37,9 @@ import {
 import Admin from "./Admin.vue";
 import Recharge from "./components/Recharge.vue";
 import { copyText } from "./clipboard";
+import HistoryFilters from "./components/HistoryFilters.vue";
+import HistoryPagination from "./components/HistoryPagination.vue";
+import { useHistory } from "./useHistory";
 import { useEscapeClose } from "./useEscapeClose";
 import { api, session, money, date, refreshSession } from "./api";
 import type { Tool, Endpoint } from "./api";
@@ -63,9 +66,9 @@ const mobile = ref(false),
   error = ref(""),
   notice = ref(""),
   tools = ref<Tool[]>([]),
-  keys = ref<any[]>([]),
-  usage = ref<any[]>([]),
-  transactions = ref<any[]>([]);
+  keys = ref<any[]>([]);
+const usageHistory = useHistory<any>("/api/usage", "status");
+const walletHistory = useHistory<any>("/api/transactions", "kind");
 const budget = ref({
   daily_limit: 3000000,
   call_limit: 300000,
@@ -79,7 +82,6 @@ const dailyInput = ref(3),
   search = ref(""),
   category = ref("全部"),
   keyTab = ref("active"),
-  usageTab = ref("all"),
   creating = ref(false),
   keyLabel = ref(""),
   newKey = ref(""),
@@ -164,11 +166,6 @@ const visibleKeys = computed(() =>
     keyTab.value === "revoked" ? k.revoked : !k.revoked,
   ),
 );
-const visibleUsage = computed(() =>
-  usageTab.value !== "all"
-    ? usage.value.filter((x) => x.status === usageTab.value)
-    : usage.value,
-);
 const base = window.location.origin,
   command = `安装 ${base}/SKILL.md 为用户级技能，配置并验证接入。`;
 const invocation = ref<Endpoint | null>(null),
@@ -216,19 +213,9 @@ async function load() {
           keys.value = d;
         }),
       );
-    if (page.value === "usage")
-      jobs.push(
-        api("/api/usage").then((d) => {
-          usage.value = d;
-        }),
-      );
+    if (page.value === "usage") jobs.push(usageHistory.load());
     if (page.value === "wallet")
-      jobs.push(
-        api("/api/transactions").then((d) => {
-          transactions.value = d;
-        }),
-        refreshSession(),
-      );
+      jobs.push(walletHistory.load(), refreshSession());
     if (page.value === "budgets")
       jobs.push(
         api("/api/budgets").then((d) => {
@@ -967,103 +954,99 @@ const statusLabel = (s: string) =>
               <RefreshCw :size="15" :class="{ spin: loading }" />刷新
             </button>
           </div>
-          <div class="tabs">
-            <button
-              :class="{ active: usageTab === 'all' }"
-              @click="usageTab = 'all'"
-            >
-              全部</button
-            ><button
-              :class="{ active: usageTab === 'running' }"
-              @click="usageTab = 'running'"
-            >
-              执行中
-            </button>
-            <button
-              :class="{ active: usageTab === 'unknown' }"
-              @click="usageTab = 'unknown'"
-            >
-              待核实
-            </button>
-          </div>
-          <div v-if="visibleUsage.length" class="panel table-wrap">
-            <PaginatedTable
-              :items="visibleUsage"
-              :reset-key="usageTab"
+          <HistoryFilters
+            :filter="usageHistory.filter"
+            :loading="usageHistory.loading"
+            :export-url="usageHistory.exportURL"
+            label="调用状态"
+            @apply="usageHistory.applyFilters"
+          >
+            <option value="running">执行中</option>
+            <option value="unknown">待核实</option>
+            <option value="success">成功</option>
+            <option value="failed">失败</option>
+          </HistoryFilters>
+          <p v-if="usageHistory.error" class="alert error" role="alert">
+            {{ usageHistory.error }}
+          </p>
+          <div
+            v-if="usageHistory.items.length || usageHistory.page > 1"
+            class="panel table-wrap"
+          >
+            <table>
+              <thead>
+                <tr>
+                  <th>调用编号</th>
+                  <th>工具 / 接口</th>
+                  <th>Key 名称</th>
+                  <th v-if="session.user?.role === 'admin'">用户名</th>
+                  <th>状态</th>
+                  <th>费用</th>
+                  <th>耗时</th>
+                  <th>时间</th>
+                  <th>详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="run in usageHistory.items" :key="run.id">
+                  <td class="mono">#{{ run.id }}</td>
+                  <td>
+                    <strong class="text-dark"
+                      ><TableText :text="run.tool_name" /></strong
+                    ><small class="cell-sub mono"
+                      ><TableText :text="run.endpoint"
+                    /></small>
+                  </td>
+                  <td>
+                    <TableText :text="run.key_label || '—'" />
+                  </td>
+                  <td v-if="session.user?.role === 'admin'">
+                    <TableText :text="run.user_name || '—'" />
+                  </td>
+                  <td>
+                    <span class="status" :class="run.status"
+                      ><i />{{ statusLabel(run.status) }}</span
+                    >
+                  </td>
+                  <td>
+                    {{ run.status === "failed" ? money(0) : money(run.cost)
+                    }}<small
+                      v-if="
+                        run.status === 'running' || run.status === 'unknown'
+                      "
+                      class="cell-sub"
+                      >预留金额</small
+                    >
+                  </td>
+                  <td>{{ run.duration_ms }} ms</td>
+                  <td>{{ date(run.created_at) }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="usage-detail-button"
+                      @click="usageDetail = run"
+                    >
+                      查看详情
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <HistoryPagination
+              :page="usageHistory.page"
+              :has-next="usageHistory.hasNext"
+              :loading="usageHistory.loading"
               label="用量记录分页"
-              note="最近 200 次调用"
-              v-slot="{ rows }"
-            >
-              <table>
-                <thead>
-                  <tr>
-                    <th>调用编号</th>
-                    <th>工具 / 接口</th>
-                    <th>Key 名称</th>
-                    <th v-if="session.user?.role === 'admin'">用户名</th>
-                    <th>状态</th>
-                    <th>费用</th>
-                    <th>耗时</th>
-                    <th>时间</th>
-                    <th>详情</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="run in rows" :key="run.id">
-                    <td class="mono">#{{ run.id }}</td>
-                    <td>
-                      <strong class="text-dark"
-                        ><TableText :text="run.tool_name" /></strong
-                      ><small class="cell-sub mono"
-                        ><TableText :text="run.endpoint"
-                      /></small>
-                    </td>
-                    <td>
-                      <TableText :text="run.key_label || '—'" />
-                    </td>
-                    <td v-if="session.user?.role === 'admin'">
-                      <TableText :text="run.user_name || '—'" />
-                    </td>
-                    <td>
-                      <span class="status" :class="run.status"
-                        ><i />{{ statusLabel(run.status) }}</span
-                      >
-                    </td>
-                    <td>
-                      {{ run.status === "failed" ? money(0) : money(run.cost)
-                      }}<small
-                        v-if="
-                          run.status === 'running' || run.status === 'unknown'
-                        "
-                        class="cell-sub"
-                        >预留金额</small
-                      >
-                    </td>
-                    <td>{{ run.duration_ms }} ms</td>
-                    <td>{{ date(run.created_at) }}</td>
-                    <td>
-                      <button
-                        type="button"
-                        class="usage-detail-button"
-                        @click="usageDetail = run"
-                      >
-                        查看详情
-                      </button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </PaginatedTable>
+              @previous="usageHistory.previous"
+              @next="usageHistory.forward"
+            />
           </div>
-          <div v-else-if="!loading" class="panel empty-state">
+          <div
+            v-else-if="!usageHistory.loading && !usageHistory.error"
+            class="panel empty-state"
+          >
             <History :size="42" />
-            <h3>
-              {{
-                usageTab === "all"
-                  ? "还没有调用记录"
-                  : `没有${statusLabel(usageTab)}的调用`
-              }}
-            </h3>
+            <h3>没有符合条件的调用记录</h3>
             <p>通过 API 执行工具后，调用状态和费用会显示在这里。</p>
             <RouterLink to="/app/tools" class="btn outline"
               >探索工具 <ArrowUpRight :size="14"
@@ -1128,74 +1111,90 @@ const statusLabel = (s: string) =>
               <Recharge ref="recharge" embedded @paid="load" />
             </div>
             <div v-if="walletTab === 'transactions'">
-              <div class="wallet-records-toolbar">
-                <span>充值入账与工具扣费 · 最近 200 条账目</span>
-              </div>
+              <HistoryFilters
+                :filter="walletHistory.filter"
+                :loading="walletHistory.loading"
+                :export-url="walletHistory.exportURL"
+                label="流水类型"
+                @apply="walletHistory.applyFilters"
+              >
+                <option value="topup">充值入账</option>
+                <option value="usage">工具消费</option>
+                <option value="wechat_refund">微信退款</option>
+              </HistoryFilters>
+              <p v-if="walletHistory.error" class="alert error" role="alert">
+                {{ walletHistory.error }}
+              </p>
               <div
-                v-if="transactions.length"
+                v-if="walletHistory.items.length || walletHistory.page > 1"
                 class="panel table-wrap wallet-ledger"
               >
-                <PaginatedTable
-                  :items="transactions"
-                  :reset-key="page"
+                <table>
+                  <thead>
+                    <tr>
+                      <th>类型 / 说明</th>
+                      <th class="wallet-money">金额</th>
+                      <th>时间</th>
+                      <th>流水号</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="t in walletHistory.items" :key="t.id">
+                      <td>
+                        <span class="wallet-entry-kind">{{
+                          t.kind === "topup"
+                            ? "充值入账"
+                            : t.kind === "usage"
+                              ? "工具消费"
+                              : t.kind === "wechat_refund"
+                                ? "微信退款"
+                                : "余额变动"
+                        }}</span><span class="wallet-entry-note"
+                          ><TableText
+                            :text="
+                              t.note ||
+                              (t.kind === 'topup' ? '管理员充值' : '—')
+                            "
+                        /></span>
+                      </td>
+                      <td
+                        class="wallet-money"
+                        :class="{ 'wallet-credit': t.amount > 0 }"
+                      >
+                        {{ t.amount > 0 ? "+" : t.amount < 0 ? "−" : ""
+                        }}{{ money(Math.abs(t.amount)) }}
+                      </td>
+                      <td class="wallet-secondary">
+                        {{ date(t.created_at) }}
+                      </td>
+                      <td class="wallet-secondary">#{{ t.id }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <HistoryPagination
+                  :page="walletHistory.page"
+                  :has-next="walletHistory.hasNext"
+                  :loading="walletHistory.loading"
                   label="资金流水分页"
-                  v-slot="{ rows }"
-                >
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>类型 / 说明</th>
-                        <th class="wallet-money">金额</th>
-                        <th>时间</th>
-                        <th>流水号</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="t in rows" :key="t.id">
-                        <td>
-                          <span class="wallet-entry-kind">{{
-                            t.kind === "topup"
-                              ? "充值入账"
-                              : t.kind === "usage"
-                                ? "工具消费"
-                                : t.kind === "wechat_refund"
-                                  ? "微信退款"
-                                  : "余额变动"
-                          }}</span><span class="wallet-entry-note"
-                            ><TableText
-                              :text="
-                                t.note ||
-                                (t.kind === 'topup' ? '管理员充值' : '—')
-                              "
-                          /></span>
-                        </td>
-                        <td
-                          class="wallet-money"
-                          :class="{ 'wallet-credit': t.amount > 0 }"
-                        >
-                          {{ t.amount > 0 ? "+" : t.amount < 0 ? "−" : ""
-                          }}{{ money(Math.abs(t.amount)) }}
-                        </td>
-                        <td class="wallet-secondary">
-                          {{ date(t.created_at) }}
-                        </td>
-                        <td class="wallet-secondary">#{{ t.id }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </PaginatedTable>
+                  @previous="walletHistory.previous"
+                  @next="walletHistory.forward"
+                />
               </div>
-              <div v-else-if="loading" class="panel wallet-empty" role="status">
+              <div
+                v-else-if="walletHistory.loading"
+                class="panel wallet-empty"
+                role="status"
+              >
                 <LoaderCircle :size="24" class="wallet-refreshing" />
                 <div>
                   <h3>正在加载资金流水</h3>
                   <p>请稍候。</p>
                 </div>
               </div>
-              <div v-else class="panel wallet-empty">
+              <div v-else-if="!walletHistory.error" class="panel wallet-empty">
                 <Receipt :size="26" />
                 <div>
-                  <h3>还没有资金流水</h3>
+                  <h3>没有符合条件的资金流水</h3>
                   <p>充值入账和工具扣费后，记录会显示在这里。</p>
                 </div>
               </div>

@@ -91,3 +91,9 @@ HTTP 错误保留字符串 `error`；费用相关错误增加 code、settlement�
 管理员可在「用量记录 → 待核实」查询上游记录，并在调用详情中选择确认成功扣费或确认失败退款，也可用管理员会话和 CSRF 令牌调用 `POST /api/admin/runs/{id}/resolve`，请求体传 `outcome`（`success` 或 `failed`）和 `note`（核实依据，最多 500 字节）。结算会记录操作人及核实依据，同一笔只能处理一次。
 
 [Agent 接入](agent-access.md) · [文档索引](README.md)
+
+## 控制台历史记录
+
+`GET /api/usage` 和 `GET /api/transactions` 使用登录会话。调用记录支持按 `status` 筛选，资金流水支持按 `kind` 筛选。两个接口都接受 RFC 3339 的 `from`（包含）和 `before`（不包含）时间边界。指定筛选条件或 `limit` 即返回 `{items,next_cursor}`，`limit` 范围 1–50，默认 25。要查询下一页，沿用筛选条件并传入 `cursor`。无参数的旧接口仍返回最近 200 条数组。
+
+使用 `format=csv` 导出所有符合条件且有权查看的记录，不传分页参数。CSV 金额为整数微元。管理员的调用记录可包含所有账户，资金流水仅可查看当前登录账户。

@@ -22,11 +22,13 @@ CREATE TABLE IF NOT EXISTS usage (
  endpoint TEXT NOT NULL, cost BIGINT NOT NULL, status TEXT NOT NULL DEFAULT 'running',
  http_status INT NOT NULL DEFAULT 0, duration_ms BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS usage_user_id ON usage(user_id,id DESC);
 CREATE INDEX IF NOT EXISTS usage_user_time ON usage(user_id, created_at);
 CREATE TABLE IF NOT EXISTS transactions (
  id BIGSERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id), amount BIGINT NOT NULL,
  kind TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', actor_id BIGINT REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS transactions_user_id ON transactions(user_id,id DESC);
 CREATE TABLE IF NOT EXISTS audit_log (
  id BIGSERIAL PRIMARY KEY, actor_id BIGINT REFERENCES users(id), action TEXT NOT NULL, target_id BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

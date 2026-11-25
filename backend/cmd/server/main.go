@@ -983,16 +983,8 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("DELETE /api/keys/{id}", a.withUser(false, a.keys))
 	m.HandleFunc("GET /api/budgets", a.withUser(false, a.budget))
 	m.HandleFunc("PUT /api/budgets", a.withUser(false, a.budget))
-	m.HandleFunc("GET /api/usage", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
-		if u.Role == "admin" {
-			a.rows(w, r, `SELECT to_jsonb(x)-'idempotency_key'-'request_fingerprint' FROM (SELECT usage.*,users.name AS user_name FROM usage JOIN users ON users.id=usage.user_id ORDER BY usage.id DESC LIMIT 200) x`)
-			return
-		}
-		a.rows(w, r, `SELECT to_jsonb(x)-'idempotency_key'-'request_fingerprint' FROM (SELECT * FROM usage WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
-	}))
-	m.HandleFunc("GET /api/transactions", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
-		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,amount,kind,note,created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
-	}))
+	m.HandleFunc("GET /api/usage", a.withUser(false, a.usageHistory))
+	m.HandleFunc("GET /api/transactions", a.withUser(false, a.transactionHistory))
 	m.HandleFunc("POST /api/admin/tools/{id}/sync", a.withUser(true, a.syncMCP))
 	m.HandleFunc("POST /api/admin/tools/{id}/bulk", a.withUser(true, a.bulkMCP))
 	m.HandleFunc("GET /api/admin/tools", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) { a.listTools(w, r, true) }))

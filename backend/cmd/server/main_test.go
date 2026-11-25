@@ -452,6 +452,37 @@ func TestIntegrationBilling(t *testing.T) {
 			}
 		})
 	}
+	t.Run("history cursor, filters and CSV isolation", func(t *testing.T) {
+		code, first, _ := request("GET", "/api/usage?limit=1&status=success", nil, userCookie, "", "")
+		require(code, 200, first)
+		cursor, _ := first["next_cursor"].(string)
+		if cursor == "" {
+			t.Fatal("missing cursor")
+		}
+		firstItem := first["items"].([]any)[0].(map[string]any)
+		code, second, _ := request("GET", "/api/usage?limit=1&status=success&cursor="+cursor, nil, userCookie, "", "")
+		require(code, 200, second)
+		secondItem := second["items"].([]any)[0].(map[string]any)
+		if firstItem["id"].(float64) <= secondItem["id"].(float64) || secondItem["status"] != "success" || secondItem["user_id"] != float64(userID) {
+			t.Fatalf("unexpected page: %v", secondItem)
+		}
+		code, filtered, _ := request("GET", "/api/usage?from=1990-01-01T00:00:00Z&before=1990-01-02T00:00:00Z", nil, userCookie, "", "")
+		if code != 200 || len(filtered["items"].([]any)) != 0 {
+			t.Fatalf("date bounds ignored: %d %v", code, filtered)
+		}
+		if _, err := db.Exec(ctx, `INSERT INTO transactions(user_id,amount,kind,note,created_at)
+			VALUES($1,0,'topup','=1+1','1990-01-01T00:00:00Z'),($2,0,'topup','private-other-record','1990-01-01T00:00:00Z')`, userID, adminID); err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("GET", "/api/transactions?format=csv&kind=topup&from=1990-01-01T00:00:00Z&before=1990-01-02T00:00:00Z", nil)
+		r.AddCookie(userCookie)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/csv") ||
+			!strings.Contains(w.Body.String(), "'=1+1") || strings.Contains(w.Body.String(), "private-other-record") {
+			t.Fatalf("incorrect export: %d %s", w.Code, w.Body)
+		}
+	})
 	var interruptedID int64
 	e = db.QueryRow(ctx, `INSERT INTO usage(user_id,tool_name,endpoint,cost,created_at) VALUES($1,'Test','/ok',100000,'2000-01-01') RETURNING id`, userID).Scan(&interruptedID)
 	if e != nil {
