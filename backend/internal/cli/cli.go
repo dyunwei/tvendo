@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ type command struct {
 func parse(args []string) (command, error) {
 	c := command{flags: map[string]string{}}
 	bools := map[string]bool{"json": true, "help": true, "version": true, "key-stdin": true}
-	values := map[string]bool{"server": true, "limit": true, "cursor": true, "request-id": true, "input": true, "input-file": true, "output": true, "max-cost-micros": true}
+	values := map[string]bool{"server": true, "limit": true, "cursor": true, "request-id": true, "idempotency-key": true, "input": true, "input-file": true, "output": true, "max-cost-micros": true}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
@@ -94,9 +95,10 @@ const help = `Tvendo：让 Agent 搜索并调用工具
   tvendo tools search "需求" [--limit 10] [--cursor <值>]
   tvendo tools show <tool_ref>
   tvendo run <tool_ref> [--input <JSON> | --input-file <文件或->]
-             [--max-cost-micros <整数>] [--output <新文件>]
+             [--max-cost-micros <整数>] [--output <新文件>] [--idempotency-key <键>]
   tvendo runs list [--limit 20] [--cursor <值>] [--request-id <id>]
   tvendo runs get <id>
+  tvendo runs result <id>
   tvendo wallet balance
   tvendo budget show
 
@@ -228,7 +230,7 @@ func execute(c command, in io.Reader, stderr io.Writer, version string) (any, er
 	} else {
 		args = args[1:]
 	}
-	allowed := map[string]string{"setup": "server key-stdin", "doctor": "", "tools search": "limit cursor", "tools show": "", "run": "input input-file max-cost-micros output", "runs list": "limit cursor request-id", "runs get": "", "wallet balance": "", "budget show": ""}
+	allowed := map[string]string{"setup": "server key-stdin", "doctor": "", "tools search": "limit cursor", "tools show": "", "run": "input input-file max-cost-micros output idempotency-key", "runs list": "limit cursor request-id", "runs get": "", "runs result": "", "wallet balance": "", "budget show": ""}
 	opts, exists := allowed[kind]
 	if !exists {
 		return nil, bad("未知命令，请运行 tvendo --help")
@@ -238,7 +240,7 @@ func execute(c command, in io.Reader, stderr io.Writer, version string) (any, er
 			return nil, bad("此命令不支持 --" + k)
 		}
 	}
-	needs := kind == "tools search" || kind == "tools show" || kind == "run" || kind == "runs get"
+	needs := kind == "tools search" || kind == "tools show" || kind == "run" || kind == "runs get" || kind == "runs result"
 	if needs && len(args) != 1 || !needs && len(args) != 0 {
 		return nil, bad("命令参数数量不正确，请运行 tvendo --help")
 	}
@@ -337,12 +339,16 @@ func execute(c command, in io.Reader, stderr io.Writer, version string) (any, er
 	case "tools show":
 		res, e := client.call("GET", "/v1/catalog/"+url.PathEscape(args[0]), nil, "")
 		return unwrap(res), e
-	case "runs get":
+	case "runs get", "runs result":
 		id, e := strconv.ParseInt(args[0], 10, 64)
 		if e != nil || id <= 0 {
 			return nil, bad("调用编号应为正整数")
 		}
-		res, e := client.call("GET", "/v1/runs/"+args[0], nil, "")
+		endpoint := "/v1/runs/" + args[0]
+		if kind == "runs result" {
+			return client.call("GET", endpoint+"/result", nil, "")
+		}
+		res, e := client.call("GET", endpoint, nil, "")
 		return unwrap(res), e
 	case "wallet balance", "budget show":
 		endpoint := "/v1/balance"
@@ -369,6 +375,10 @@ type apiClient struct {
 }
 
 func (c *apiClient) call(method, path string, body any, requestID string) (map[string]any, error) {
+	return c.callWithIdempotency(method, path, body, requestID, "")
+}
+
+func (c *apiClient) callWithIdempotency(method, path string, body any, requestID, idempotencyKey string) (map[string]any, error) {
 	var buf bytes.Buffer
 	if body != nil {
 		if e := json.NewEncoder(&buf).Encode(body); e != nil {
@@ -386,6 +396,10 @@ func (c *apiClient) call(method, path string, body any, requestID string) (map[s
 	}
 	if requestID != "" {
 		req.Header.Set("X-Request-ID", requestID)
+	}
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+		req.GetBody = nil // Keep transport retries disabled for charged calls.
 	}
 	res, e := c.http.Do(req)
 	if e != nil {
@@ -412,6 +426,9 @@ func (c *apiClient) call(method, path string, body any, requestID string) (map[s
 	}
 	if code, ok := data["code"].(string); ok {
 		f.Code = code
+	}
+	if original, ok := data["request_id"].(string); ok && original != "" {
+		f.RequestID = original
 	}
 	if id, ok := data["id"]; ok {
 		f.RunID = id
@@ -440,7 +457,7 @@ func (c *apiClient) call(method, path string, body any, requestID string) (map[s
 	if method == "POST" && res.StatusCode >= 400 && res.StatusCode < 500 && f.Settlement == "" {
 		f.Settlement = "not_started"
 	}
-	if method == "POST" && f.Settlement != "refunded" && f.Settlement != "not_started" {
+	if method == "POST" && f.Settlement != "refunded" && f.Settlement != "not_started" && f.Settlement != "charged" {
 		f.Exit = 7
 		f.Settlement = "unknown"
 	}
@@ -451,6 +468,9 @@ func (c *apiClient) call(method, path string, body any, requestID string) (map[s
 	}
 	return nil, f
 }
+
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,80}$`)
+
 func run(c command, ref string, in io.Reader, stderr io.Writer, client *apiClient) (any, error) {
 	raw := []byte("{}")
 	inline, hasInline := c.flags["input"]
@@ -494,6 +514,19 @@ func run(c command, ref string, in io.Reader, stderr io.Writer, client *apiClien
 		}
 		body["max_cost_micros"] = n
 	}
+	idempotencyKey, optIn := c.flags["idempotency-key"]
+	if optIn && !idempotencyKeyPattern.MatchString(idempotencyKey) {
+		return nil, bad("幂等键须为 8–80 位字母、数字、下划线或连字符")
+	}
+	if optIn {
+		info, err := client.call("GET", "/v1/info", nil, "")
+		if err != nil {
+			return nil, err
+		}
+		if unwrap(info)["run_idempotency"] != true {
+			return nil, bad("当前服务不支持调用幂等，请联系管理员升级")
+		}
+	}
 	// Reserve a new output path before any paid call. Never truncate existing data.
 	var output *os.File
 	completed := false
@@ -510,17 +543,23 @@ func run(c command, ref string, in io.Reader, stderr io.Writer, client *apiClien
 			}
 		}()
 	}
-	token := make([]byte, 16)
-	if _, e := rand.Read(token); e != nil {
-		return nil, bad("无法生成请求标识")
+	requestID := idempotencyKey
+	if requestID == "" {
+		token := make([]byte, 16)
+		if _, e := rand.Read(token); e != nil {
+			return nil, bad("无法生成请求标识")
+		}
+		requestID = hex.EncodeToString(token)
 	}
-	requestID := hex.EncodeToString(token)
 	fmt.Fprintln(stderr, "请求标识:", requestID)
-	res, e := client.call("POST", "/v1/run", body, requestID)
+	res, e := client.callWithIdempotency("POST", "/v1/run", body, requestID, idempotencyKey)
 	if e != nil {
 		return nil, e
 	}
 	currency, _ := res["currency"].(string)
+	if original, ok := res["request_id"].(string); ok && original != "" {
+		requestID = original
+	}
 	result := map[string]any{"run_id": res["id"], "request_id": requestID, "status": "success", "cost_micros": res["cost_micros"], "result": res["data"]}
 	if currency != "" {
 		result["currency"] = currency

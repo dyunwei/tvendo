@@ -130,6 +130,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	d := json.NewDecoder(r.Body)
+	d.UseNumber()
 	if e := d.Decode(v); e != nil {
 		fail(w, 400, "请求数据格式错误")
 		return false
@@ -655,10 +656,6 @@ func (a *App) run(w http.ResponseWriter, r *http.Request) {
 
 // Both API clients and the console share the same billing and budget checks.
 func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
-	if !a.rate(r, "run", 120) {
-		fail(w, 429, "调用频率超限")
-		return
-	}
 	var b struct {
 		Tool       string         `json:"tool"`
 		Endpoint   string         `json:"endpoint"`
@@ -698,6 +695,26 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, "费用上限不能为负数")
 		return
 	}
+	if b.Parameters == nil {
+		b.Parameters = map[string]any{}
+	}
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+	var fingerprint string
+	if idempotencyKey != "" {
+		if !requestIDPattern.MatchString(idempotencyKey) {
+			fail(w, 400, "幂等键无效")
+			return
+		}
+		input, _ := json.Marshal(b)
+		fingerprint = hash(string(input))
+		if a.replayRun(w, r, a.db, u.ID, idempotencyKey, fingerprint, requestID) {
+			return
+		}
+	}
+	if !a.rate(r, "run", 120) {
+		fail(w, 429, "调用频率超限")
+		return
+	}
 	var raw []byte
 	var provider Tool
 	e := a.db.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE enabled=true AND (($1<>'' AND slug=$1) OR ($2::bigint>0 AND id=$2))`, b.Tool, providerID).Scan(&raw)
@@ -732,9 +749,6 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		agentError(w, 403, "COST_LIMIT_EXCEEDED", "实际售价超出本次费用上限", "not_started", 0, requestID)
 		return
 	}
-	if b.Parameters == nil {
-		b.Parameters = map[string]any{}
-	}
 	var req *http.Request
 	if !isMCP(provider) {
 		payload, _ := json.Marshal(b.Parameters)
@@ -745,7 +759,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 				switch x := v.(type) {
 				case string:
 					q.Set(k, x)
-				case float64, bool:
+				case json.Number, bool:
 					q.Set(k, fmt.Sprint(x))
 				default:
 					j, _ := json.Marshal(x)
@@ -784,6 +798,9 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 500, "无法读取余额")
 		return
 	}
+	if idempotencyKey != "" && a.replayRun(w, r, tx, u.ID, idempotencyKey, fingerprint, requestID) {
+		return
+	}
 	var spent int64
 	e = tx.QueryRow(r.Context(), `SELECT COALESCE(sum(cost),0) FROM usage WHERE user_id=$1 AND status IN ('success','running') AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent)
 	if e != nil {
@@ -799,7 +816,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	var runID int64
-	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id,key_id,key_label) VALUES($1,$2,$3,$4,$5,NULLIF($6::bigint,0),$7) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID, u.KeyID, u.KeyLabel).Scan(&runID)
+	e = tx.QueryRow(r.Context(), `INSERT INTO usage(user_id,tool_name,endpoint,cost,request_id,key_id,key_label,idempotency_key,request_fingerprint) VALUES($1,$2,$3,$4,$5,NULLIF($6::bigint,0),$7,NULLIF($8,''),NULLIF($9,'')) RETURNING id`, u.ID, name, ep.Path, ep.Price, requestID, u.KeyID, u.KeyLabel, idempotencyKey, fingerprint).Scan(&runID)
 	if e != nil {
 		fail(w, 500, "创建调用记录失败")
 		return
@@ -845,23 +862,30 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	}
 	finishCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds(), failure); e != nil {
+	var result json.RawMessage
+	var encryptedResult string
+	if success {
+		result = body
+		if !json.Valid(result) {
+			result, _ = json.Marshal(string(body))
+		}
+		if idempotencyKey != "" {
+			encryptedResult = a.encrypt(string(result))
+		}
+	}
+	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds(), failure, encryptedResult); e != nil {
 		log.Printf("settle run %d: %v", runID, e)
 		agentError(w, 503, "SETTLEMENT_UNKNOWN", "结算暂未完成，请查询调用记录，勿自动重试", "unknown", runID, requestID)
 		return
 	}
 	if !success {
-		message := fmt.Sprintf("上游调用失败，预留余额已退回。调用编号：%d。详情：%s", runID, failure.Message)
+		message := upstreamFailureMessage(runID, failure.Message)
 		agentError(w, 502, "UPSTREAM_FAILED", message, "refunded", runID, requestID)
 		return
 	}
-	var result any
-	if json.Unmarshal(body, &result) != nil {
-		result = string(body)
-	}
-	writeJSON(w, 200, map[string]any{"id": runID, "cost_micros": ep.Price, "data": result, "request_id": requestID, "currency": billing.Currency})
+	writeRunResult(w, runID, ep.Price, requestID, result)
 }
-func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64, failure callFailure) error {
+func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64, failure callFailure, encryptedResult string) error {
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -890,6 +914,11 @@ func (a *App) settle(ctx context.Context, runID, userID, cost int64, success boo
 	if e != nil {
 		return e
 	}
+	if encryptedResult != "" {
+		if _, e = tx.Exec(ctx, `INSERT INTO run_results(run_id,encrypted_data,expires_at) VALUES($1,$2,now()+interval '24 hours')`, runID, encryptedResult); e != nil {
+			return e
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -910,7 +939,7 @@ func (a *App) recoverRuns(ctx context.Context) {
 	}
 	rows.Close()
 	for _, p := range out {
-		if e := a.settle(ctx, p.id, p.user, p.cost, false, 0, 0, callFailure{Code: "RUN_INTERRUPTED", Message: "调用长时间未完成，系统已回收预留余额；可能因服务重启或执行中断"}); e != nil {
+		if e := a.settle(ctx, p.id, p.user, p.cost, false, 0, 0, callFailure{Code: "RUN_INTERRUPTED", Message: "调用长时间未完成，系统已回收预留余额；可能因服务重启或执行中断"}, ""); e != nil {
 			log.Print(e)
 		}
 	}
@@ -984,6 +1013,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /v1/catalog/{ref}", a.withAPI(a.catalog))
 	m.HandleFunc("GET /v1/runs", a.withAPI(a.agentRuns))
 	m.HandleFunc("GET /v1/runs/{id}", a.withAPI(a.agentRuns))
+	m.HandleFunc("GET /v1/runs/{id}/result", a.withAPI(a.getRunResult))
 	m.HandleFunc("GET /v1/budgets", a.withAPI(a.agentBudget))
 	m.HandleFunc("GET /v1/balance", a.withAPI(func(w http.ResponseWriter, r *http.Request, u User) {
 		agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": billing.Currency})
@@ -1087,6 +1117,7 @@ func main() {
 				return
 			case <-ticker.C:
 				a.recoverRuns(ctx)
+				a.purgeRunResults(ctx)
 			}
 		}
 	}()

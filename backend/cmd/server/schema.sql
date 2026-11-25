@@ -44,6 +44,17 @@ CREATE INDEX IF NOT EXISTS usage_user_request ON usage(user_id, request_id);
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS error_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS error_message TEXT NOT NULL DEFAULT '';
 
+ALTER TABLE usage ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE usage ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS usage_user_idempotency ON usage(user_id, idempotency_key)
+ WHERE idempotency_key IS NOT NULL;
+CREATE TABLE IF NOT EXISTS run_results (
+ run_id BIGINT PRIMARY KEY REFERENCES usage(id) ON DELETE CASCADE,
+ encrypted_data TEXT NOT NULL,
+ expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS run_results_expiry ON run_results(expires_at);
+
 -- One vector per endpoint/model configuration. Hashes invalidate changed descriptions;
 -- a model revision change builds a separate index without serving old vectors.
 CREATE TABLE IF NOT EXISTS catalog_embeddings (

@@ -38,10 +38,11 @@ curl http://localhost:8080/v1/run \
 | `GET /v1/catalog/{tool_ref}` | 对引用做 URL 路径段编码；返回 Schema、示例、类型及价格 |
 | `GET /v1/runs` | limit 默认 20，范围 1–50；cursor 分页；request_id 可筛选 |
 | `GET /v1/runs/{id}` | 本账户单次调用记录，其他账户记录返回 404 |
+| `GET /v1/runs/{id}/result` | 恢复本账户通过幂等键保存的成功结果，成功体与调用接口相同 |
 | `GET /v1/balance` | balance_micros 与 currency=CNY |
 | `GET /v1/budgets` | daily_limit_micros、call_limit_micros、daily_enabled、call_enabled、spent_micros、held_micros、resets_at、currency |
 
-查询成功返回 `{ok:true,data:...}`。目录与调用记录列表的 data 包含 `items`、`next_cursor`；空游标表示没有后页。目录条目含 `currency`、`tool_ref`、name、provider、description、price_micros、schema_available；详情额外含 `input_schema`、`input_example`、`upstream_type`（若已配置）。
+除结果恢复接口外，查询成功返回 `{ok:true,data:...}`。目录与调用记录列表的 data 包含 `items`、`next_cursor`；空游标表示没有后页。目录条目含 `currency`、`tool_ref`、name、provider、description、price_micros、schema_available；详情额外含 `input_schema`、`input_example`、`upstream_type`（若已配置）。
 
 目录响应新增 `data.search`，含 mode（directory/keyword/hybrid）、degraded、reason、indexed、total。端点可设置并返回可选 `search_description`。非空查询游标绑定查询和候选顺序，结果顺序改变时返回 400，需从第一页重新搜索。
 
@@ -59,7 +60,9 @@ curl http://localhost:8080/v1/run \
 
 `POST /v1/run` 保留旧 tool / endpoint 参数形式，与 tool_ref 互斥。`max_cost_micros` 为可选非负整数，实际售价超限时不创建调用、不扣费；不传时仍执行账户预算限制。
 
-建议客户端在调用前生成 `X-Request-ID`，要求为 8–80 位字母、数字、下划线或连字符。响应头返回该标识，已创建的调用记录也会保存它。成功体为 `{id,cost_micros,data,request_id,currency}`。标识仅用于查询核对，不提供幂等去重。
+建议客户端在调用前生成 `X-Request-ID`，要求为 8–80 位字母、数字、下划线或连字符。响应头返回该标识，已创建的调用记录也会保存它。成功体为 `{id,cost_micros,data,request_id,currency}`。请求标识用于查询核对。
+
+可选的 `Idempotency-Key` 请求头同样接受 8–80 位字母、数字、下划线或连字符。每次逻辑调用使用一个新键，并在发送前保存键和请求标识。账户内相同键和参数只执行并结算一次。请求体字段顺序不影响比较，工具引用形式、参数值与费用上限须保持一致。重复调用返回原调用的请求标识、状态或结果。变更参数会返回 409；未创建调用记录的请求（例如预算超限）允许用原键再次提交。成功结果加密保存 24 小时，其后同一键仍会去重，结果返回 410。旧版本服务器可能忽略该请求头，重发前应确认部署版本支持幂等。
 
 ## 错误和结算
 
@@ -73,6 +76,9 @@ HTTP 错误保留字符串 `error`；费用相关错误增加 code、settlement�
 | 403 / BUDGET_EXCEEDED | 账户预算拦截，settlement=not_started |
 | 403 / COST_LIMIT_EXCEEDED | 实际售价超出本次上限，settlement=not_started |
 | 404 | 工具不可用或记录不存在 |
+| 409 / RUN_PENDING | 原调用尚未完成，查询原调用记录 |
+| 409 / IDEMPOTENCY_CONFLICT | 该键已经用于另一组参数 |
+| 410 / RESULT_UNAVAILABLE | 调用已结算，结果未保存或已过期 |
 | 429 | 频率超限 |
 | 502 / UPSTREAM_FAILED | 只有 settlement=refunded 才表示预留已退回 |
 | 503 / SETTLEMENT_UNKNOWN | 先查询记录，禁止自动重试 |

@@ -198,6 +198,7 @@ func (a *App) cliAsset(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) cliInfo() map[string]any {
 	info := map[string]any{"brand": "T vendo", "api_version": 1, "version": buildVersion, "currency": billing.Currency, "micros_per_unit": 1000000, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
+	info["run_idempotency"] = true
 	raw, err := os.ReadFile(filepath.Join(env("CLI_DIST", "../distribution/dist"), "manifest.json"))
 	var manifest struct {
 		Version string `json:"version"`

@@ -108,7 +108,7 @@ func TestIntegrationBilling(t *testing.T) {
 	}))
 	defer upstream.Close()
 	h := a.routes()
-	request := func(method, path string, body any, cookie *http.Cookie, csrf, key string) (int, map[string]any, []*http.Cookie) {
+	request := func(method, path string, body any, cookie *http.Cookie, csrf, key string, idempotency ...string) (int, map[string]any, []*http.Cookie) {
 		var buf bytes.Buffer
 		if body != nil {
 			json.NewEncoder(&buf).Encode(body)
@@ -119,6 +119,10 @@ func TestIntegrationBilling(t *testing.T) {
 			r.AddCookie(cookie)
 		}
 		r.Header.Set("X-CSRF-Token", csrf)
+		if len(idempotency) > 0 {
+			r.Header.Set("Idempotency-Key", idempotency[0])
+			r.Header.Set("X-Request-ID", idempotency[0])
+		}
 		if key != "" {
 			r.Header.Set("Authorization", "Bearer "+key)
 		}
@@ -546,5 +550,67 @@ func TestIntegrationBilling(t *testing.T) {
 	if provider.Revision != originalRevision || len(provider.Endpoints) != 4 {
 		t.Fatal("failed sync modified catalog")
 	}
+	t.Run("idempotent results", func(t *testing.T) {
+		const key = "test-idempotency-001"
+		if _, err := db.Exec(ctx, `UPDATE users SET balance=2000000 WHERE email='other@test.local'`); err != nil {
+			t.Fatal(err)
+		}
+		body := runBody("ok")
+		type response struct {
+			code int
+			body map[string]any
+		}
+		const concurrency = 6
+		results := make(chan response, concurrency)
+		for range concurrency {
+			go func() {
+				code, out, _ := request("POST", "/v1/run", body, nil, "", otherKey, key)
+				results <- response{code, out}
+			}()
+		}
+		var id any
+		var invalid []response
+		for range concurrency {
+			res := <-results
+			if res.code != 200 && (res.code != 409 || res.body["code"] != "RUN_PENDING") {
+				invalid = append(invalid, res)
+			}
+			if id == nil {
+				id = res.body["id"]
+			}
+			if id != res.body["id"] {
+				invalid = append(invalid, res)
+			}
+		}
+		if len(invalid) != 0 || id == nil {
+			t.Fatalf("concurrent calls should refer to a single run: %v", invalid)
+		}
+		var calls, balance int64
+		if err := db.QueryRow(ctx, `SELECT (SELECT count(*) FROM usage WHERE idempotency_key=$1),balance FROM users WHERE email='other@test.local'`, key).Scan(&calls, &balance); err != nil || calls != 1 || balance != 1000000 {
+			t.Fatalf("calls=%d balance=%d error=%v", calls, balance, err)
+		}
+		code, out, _ := request("POST", "/v1/run", body, nil, "", otherKey, key)
+		if code != 200 || out["id"] != id || out["data"].(map[string]any)["ok"] != true {
+			t.Fatalf("replay did not return the original result: %d %v", code, out)
+		}
+		code, out, _ = request("POST", "/v1/run", runBody("fail"), nil, "", otherKey, key)
+		if code != 409 || out["code"] != "IDEMPOTENCY_CONFLICT" {
+			t.Fatalf("different request accepted for existing key: %d %v", code, out)
+		}
+		path := fmt.Sprintf("/v1/runs/%.0f/result", id)
+		code, out, _ = request("GET", path, nil, nil, "", otherKey)
+		if code != 200 || out["id"] != id || out["data"].(map[string]any)["ok"] != true {
+			t.Fatalf("saved result missing: %d %v", code, out)
+		}
+		code, out, _ = request("GET", path, nil, nil, "", mcpKey)
+		require(code, 404, out)
+		if _, err := db.Exec(ctx, `UPDATE run_results SET expires_at=now() WHERE run_id=$1`, int64(id.(float64))); err != nil {
+			t.Fatal(err)
+		}
+		code, out, _ = request("POST", "/v1/run", body, nil, "", otherKey, key)
+		if code != 410 || out["id"] != id || out["settlement"] != "charged" {
+			t.Fatalf("expired replay should not start another call: %d %v", code, out)
+		}
+	})
 	t.Run("WeChat payments", func(t *testing.T) { exercisePayments(t, a, userCookie, userCSRF, userID) })
 }
