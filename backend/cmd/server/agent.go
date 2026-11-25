@@ -131,7 +131,7 @@ func (a *App) agentRuns(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, "请求标识无效")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,error_code,error_message,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
+	rows, err := a.db.Query(r.Context(), `SELECT row_to_json(x) FROM (SELECT id,tool_name,endpoint,cost AS cost_micros,status,http_status,duration_ms,error_code,error_message,resolution_note,resolved_at,created_at,request_id,$6::text AS currency FROM usage WHERE user_id=$1 AND ($2::bigint=0 OR id=$2) AND id<$3 AND ($4='' OR request_id=$4) ORDER BY id DESC LIMIT $5) x`, u.ID, id, before, requestID, limit+1, billing.Currency)
 	if err != nil {
 		fail(w, 500, "无法读取调用记录")
 		return
@@ -178,7 +178,7 @@ func (a *App) withAPI(fn func(http.ResponseWriter, *http.Request, User)) http.Ha
 }
 func (a *App) agentBudget(w http.ResponseWriter, r *http.Request, u User) {
 	var spent, held int64
-	err := a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(cost) FILTER (WHERE status='success'),0),COALESCE(sum(cost) FILTER (WHERE status='running'),0) FROM usage WHERE user_id=$1 AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent, &held)
+	err := a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(cost) FILTER (WHERE status='success'),0),COALESCE(sum(cost) FILTER (WHERE status IN ('running','unknown')),0) FROM usage WHERE user_id=$1 AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent, &held)
 	if err != nil {
 		fail(w, 500, "预算读取失败")
 		return

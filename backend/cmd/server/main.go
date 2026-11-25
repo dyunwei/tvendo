@@ -15,15 +15,18 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"tvendo/internal/billing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
@@ -554,7 +557,7 @@ func (a *App) budget(w http.ResponseWriter, r *http.Request, u User) {
 		u, _ = a.user(r.Context(), u.ID)
 	}
 	var spent, held int64
-	e := a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(cost) FILTER (WHERE status='success'),0),COALESCE(sum(cost) FILTER(WHERE status='running'),0) FROM usage WHERE user_id=$1 AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent, &held)
+	e := a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(cost) FILTER (WHERE status='success'),0),COALESCE(sum(cost) FILTER(WHERE status IN ('running','unknown')),0) FROM usage WHERE user_id=$1 AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent, &held)
 	if e != nil {
 		fail(w, 500, "预算读取失败")
 		return
@@ -802,7 +805,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		return
 	}
 	var spent int64
-	e = tx.QueryRow(r.Context(), `SELECT COALESCE(sum(cost),0) FROM usage WHERE user_id=$1 AND status IN ('success','running') AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent)
+	e = tx.QueryRow(r.Context(), `SELECT COALESCE(sum(cost),0) FROM usage WHERE user_id=$1 AND status IN ('success','running','unknown') AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent)
 	if e != nil {
 		fail(w, 500, "无法读取预算")
 		return
@@ -830,9 +833,12 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	var body []byte
 	status := 0
 	var callErr error
+	var uncertain bool
 	if isMCP(provider) {
 		callCtx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		body, callErr = a.callMCP(callCtx, provider, ep, b.Parameters)
+		var uncertainMCP *uncertainMCPError
+		uncertain = errors.As(callErr, &uncertainMCP)
 		cancel()
 		if callErr == nil {
 			status = 200
@@ -844,7 +850,11 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 		}
 	} else {
 		var response *http.Response
+		var connected atomic.Bool
+		trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 		response, callErr = a.client.Do(req)
+		uncertain = callErr != nil && connected.Load()
 		if callErr == nil {
 			status = response.StatusCode
 			body, callErr = io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
@@ -852,11 +862,18 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 			if len(body) > 8<<20 {
 				callErr = errResponseTooLarge
 			}
+			uncertain = status == http.StatusRequestTimeout || status == http.StatusBadGateway ||
+				status == http.StatusGatewayTimeout || status >= 200 && status < 300 && callErr != nil
 		}
 	}
-	success := callErr == nil && status >= 200 && status < 300
+	state := "failed"
+	if callErr == nil && status >= 200 && status < 300 {
+		state = "success"
+	} else if uncertain {
+		state = "unknown"
+	}
 	failure := callFailure{}
-	if !success {
+	if state != "success" {
 		failure = a.describeCallFailure(provider, callErr, status, body)
 		log.Printf("upstream failed run_id=%d request_id=%q tool=%q endpoint=%q http_status=%d error_code=%s detail=%q", runID, requestID, name, ep.Path, status, failure.Code, failure.Message)
 	}
@@ -864,7 +881,7 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 	defer cancel()
 	var result json.RawMessage
 	var encryptedResult string
-	if success {
+	if state == "success" {
 		result = body
 		if !json.Valid(result) {
 			result, _ = json.Marshal(string(body))
@@ -873,19 +890,23 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 			encryptedResult = a.encrypt(string(result))
 		}
 	}
-	if e = a.settle(finishCtx, runID, u.ID, ep.Price, success, status, time.Since(start).Milliseconds(), failure, encryptedResult); e != nil {
+	if e = a.settle(finishCtx, runID, u.ID, ep.Price, state, status, time.Since(start).Milliseconds(), failure, encryptedResult); e != nil {
 		log.Printf("settle run %d: %v", runID, e)
 		agentError(w, 503, "SETTLEMENT_UNKNOWN", "结算暂未完成，请查询调用记录，勿自动重试", "unknown", runID, requestID)
 		return
 	}
-	if !success {
+	if state == "unknown" {
+		writeUnknownRun(w, runID, requestID)
+		return
+	}
+	if state == "failed" {
 		message := upstreamFailureMessage(runID, failure.Message)
 		agentError(w, 502, "UPSTREAM_FAILED", message, "refunded", runID, requestID)
 		return
 	}
 	writeRunResult(w, runID, ep.Price, requestID, result)
 }
-func (a *App) settle(ctx context.Context, runID, userID, cost int64, success bool, status int, duration int64, failure callFailure, encryptedResult string) error {
+func (a *App) settle(ctx context.Context, runID, userID, cost int64, state string, status int, duration int64, failure callFailure, encryptedResult string) error {
 	tx, e := a.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -895,10 +916,6 @@ func (a *App) settle(ctx context.Context, runID, userID, cost int64, success boo
 	if e = tx.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&locked); e != nil {
 		return e
 	}
-	state := "failed"
-	if success {
-		state = "success"
-	}
 	result, e := tx.Exec(ctx, `UPDATE usage SET status=$2,http_status=$3,duration_ms=$4,error_code=$5,error_message=$6 WHERE id=$1 AND status='running'`, runID, state, status, duration, failure.Code, failure.Message)
 	if e != nil {
 		return e
@@ -906,12 +923,7 @@ func (a *App) settle(ctx context.Context, runID, userID, cost int64, success boo
 	if result.RowsAffected() == 0 {
 		return tx.Commit(ctx)
 	}
-	if !success {
-		_, e = tx.Exec(ctx, `UPDATE users SET balance=balance+$2 WHERE id=$1`, userID, cost)
-	} else {
-		_, e = tx.Exec(ctx, `INSERT INTO transactions(user_id,amount,kind,note) VALUES($1,$2,'usage',$3)`, userID, -cost, fmt.Sprintf("调用 #%d", runID))
-	}
-	if e != nil {
+	if e = applyRunSettlement(ctx, tx, runID, userID, cost, state); e != nil {
 		return e
 	}
 	if encryptedResult != "" {
@@ -922,26 +934,30 @@ func (a *App) settle(ctx context.Context, runID, userID, cost int64, success boo
 	return tx.Commit(ctx)
 }
 
-// Calls are capped at 60s. Recover reservations left behind by a process crash after 5 minutes.
+func applyRunSettlement(ctx context.Context, tx pgx.Tx, runID, userID, cost int64, state string) error {
+	switch state {
+	case "failed":
+		_, err := tx.Exec(ctx, `UPDATE users SET balance=balance+$2 WHERE id=$1`, userID, cost)
+		return err
+	case "success":
+		_, err := tx.Exec(ctx, `INSERT INTO transactions(user_id,amount,kind,note) VALUES($1,$2,'usage',$3)`, userID, -cost, fmt.Sprintf("调用 #%d", runID))
+		return err
+	default:
+		return nil
+	}
+}
+
+// Calls are capped at 60s. Flag abandoned reservations for reconciliation after 5 minutes.
 func (a *App) recoverRuns(ctx context.Context) {
-	rows, e := a.db.Query(ctx, `SELECT id,user_id,cost FROM usage WHERE status='running' AND created_at<now()-interval '5 minutes'`)
-	if e != nil {
-		log.Print(e)
-		return
-	}
-	type pending struct{ id, user, cost int64 }
-	out := []pending{}
-	for rows.Next() {
-		var p pending
-		if rows.Scan(&p.id, &p.user, &p.cost) == nil {
-			out = append(out, p)
-		}
-	}
-	rows.Close()
-	for _, p := range out {
-		if e := a.settle(ctx, p.id, p.user, p.cost, false, 0, 0, callFailure{Code: "RUN_INTERRUPTED", Message: "调用长时间未完成，系统已回收预留余额；可能因服务重启或执行中断"}, ""); e != nil {
-			log.Print(e)
-		}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := a.db.Exec(ctx, `
+		UPDATE usage SET status='unknown',error_code='RUN_INTERRUPTED',error_message='调用中断，等待核实上游结果'
+		WHERE id IN (
+			SELECT id FROM usage WHERE status='running' AND created_at<now()-interval '5 minutes'
+			ORDER BY created_at LIMIT 500 FOR UPDATE SKIP LOCKED
+		)`); err != nil {
+		log.Printf("flag interrupted runs: %v", err)
 	}
 }
 func (a *App) routes() http.Handler {
@@ -977,10 +993,10 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("PUT /api/budgets", a.withUser(false, a.budget))
 	m.HandleFunc("GET /api/usage", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
 		if u.Role == "admin" {
-			a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT usage.*,users.name AS user_name FROM usage JOIN users ON users.id=usage.user_id ORDER BY usage.id DESC LIMIT 200) x`)
+			a.rows(w, r, `SELECT to_jsonb(x)-'idempotency_key'-'request_fingerprint' FROM (SELECT usage.*,users.name AS user_name FROM usage JOIN users ON users.id=usage.user_id ORDER BY usage.id DESC LIMIT 200) x`)
 			return
 		}
-		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT * FROM usage WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
+		a.rows(w, r, `SELECT to_jsonb(x)-'idempotency_key'-'request_fingerprint' FROM (SELECT * FROM usage WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
 	}))
 	m.HandleFunc("GET /api/transactions", a.withUser(false, func(w http.ResponseWriter, r *http.Request, u User) {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT id,amount,kind,note,created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 200) x`, u.ID)
@@ -999,6 +1015,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("POST /api/payments/wechat/notify", a.wechatNotify)
 	m.HandleFunc("GET /api/admin/payments", a.withUser(true, a.adminPaymentOrders))
 	m.HandleFunc("POST /api/admin/topup", a.withUser(true, a.topup))
+	m.HandleFunc("POST /api/admin/runs/{id}/resolve", a.withUser(true, a.resolveRun))
 	m.HandleFunc("GET /api/admin/audit", a.withUser(true, func(w http.ResponseWriter, r *http.Request, u User) {
 		a.rows(w, r, `SELECT row_to_json(x) FROM (SELECT a.id,a.action,a.target_id,a.created_at,u.email AS actor FROM audit_log a JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 200) x`)
 	}))

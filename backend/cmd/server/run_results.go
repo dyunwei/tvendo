@@ -41,6 +41,8 @@ func (a *App) replayRun(w http.ResponseWriter, r *http.Request, db runQuerier, u
 	switch state {
 	case "success":
 		a.writeStoredRunResult(w, runID, cost, originalRequestID, encrypted)
+	case "unknown":
+		writeUnknownRun(w, runID, originalRequestID)
 	case "failed":
 		agentError(w, 502, "UPSTREAM_FAILED", upstreamFailureMessage(runID, message), "refunded", runID, originalRequestID)
 	default:
@@ -94,6 +96,8 @@ func (a *App) getRunResult(w http.ResponseWriter, r *http.Request, u User) {
 	switch state {
 	case "success":
 		a.writeStoredRunResult(w, runID, cost, requestID, encrypted)
+	case "unknown":
+		writeUnknownRun(w, runID, requestID)
 	case "failed":
 		agentError(w, 409, "RUN_FAILED", "调用失败，预留余额已退回", "refunded", runID, requestID)
 	default:

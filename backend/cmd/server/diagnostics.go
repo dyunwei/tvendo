@@ -30,7 +30,7 @@ func (a *App) describeCallFailure(provider Tool, err error, status int, body []b
 	var dns *net.DNSError
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()):
-		failure = callFailure{"UPSTREAM_TIMEOUT", "上游请求超时，请稍后重试或检查上游服务"}
+		failure = callFailure{"UPSTREAM_TIMEOUT", "上游请求超时，请核对调用记录和上游状态"}
 	case errors.Is(err, context.Canceled):
 		failure = callFailure{"REQUEST_CANCELED", "调用已取消或客户端连接已断开"}
 	case errors.Is(err, errResponseTooLarge):

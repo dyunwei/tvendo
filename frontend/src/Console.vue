@@ -90,8 +90,37 @@ const dailyInput = ref(3),
 const recharge = ref<InstanceType<typeof Recharge> | null>(null);
 const walletTab = ref("orders");
 const usageDetail = ref<any>(null);
+const resolutionOutcome = ref("");
+const resolutionNote = ref("");
+const resolutionError = ref("");
+const resolving = ref(false);
+watch(usageDetail, () => {
+  resolutionOutcome.value = "";
+  resolutionNote.value = "";
+  resolutionError.value = "";
+});
+async function resolveUsage() {
+  if (!usageDetail.value || resolving.value) return;
+  resolving.value = true;
+  resolutionError.value = "";
+  try {
+    await api(`/api/admin/runs/${usageDetail.value.id}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({
+        outcome: resolutionOutcome.value,
+        note: resolutionNote.value,
+      }),
+    });
+    usageDetail.value = null;
+    await Promise.all([load(), refreshSession()]);
+  } catch (e) {
+    resolutionError.value = (e as Error).message;
+  } finally {
+    resolving.value = false;
+  }
+}
 function closeModal() {
-  if (busy.value || invoking.value) return;
+  if (busy.value || invoking.value || resolving.value) return;
   creating.value = false;
   newKey.value = "";
   revokeID.value = null;
@@ -136,8 +165,8 @@ const visibleKeys = computed(() =>
   ),
 );
 const visibleUsage = computed(() =>
-  usageTab.value === "running"
-    ? usage.value.filter((x) => x.status === "running")
+  usageTab.value !== "all"
+    ? usage.value.filter((x) => x.status === usageTab.value)
     : usage.value,
 );
 const base = window.location.origin,
@@ -333,7 +362,12 @@ async function invoke() {
   }
 }
 const statusLabel = (s: string) =>
-  ({ success: "成功", failed: "失败 · 已退款", running: "执行中" })[s] || s;
+  ({
+    success: "成功",
+    failed: "失败 · 已退款",
+    running: "执行中",
+    unknown: "待核实",
+  })[s] || s;
 </script>
 <template>
   <div class="console-shell">
@@ -945,6 +979,12 @@ const statusLabel = (s: string) =>
             >
               执行中
             </button>
+            <button
+              :class="{ active: usageTab === 'unknown' }"
+              @click="usageTab = 'unknown'"
+            >
+              待核实
+            </button>
           </div>
           <div v-if="visibleUsage.length" class="panel table-wrap">
             <PaginatedTable
@@ -991,7 +1031,11 @@ const statusLabel = (s: string) =>
                     </td>
                     <td>
                       {{ run.status === "failed" ? money(0) : money(run.cost)
-                      }}<small v-if="run.status === 'running'" class="cell-sub"
+                      }}<small
+                        v-if="
+                          run.status === 'running' || run.status === 'unknown'
+                        "
+                        class="cell-sub"
                         >预留金额</small
                       >
                     </td>
@@ -1015,7 +1059,9 @@ const statusLabel = (s: string) =>
             <History :size="42" />
             <h3>
               {{
-                usageTab === "running" ? "没有执行中的调用" : "还没有调用记录"
+                usageTab === "all"
+                  ? "还没有调用记录"
+                  : `没有${statusLabel(usageTab)}的调用`
               }}
             </h3>
             <p>通过 API 执行工具后，调用状态和费用会显示在这里。</p>
@@ -1113,8 +1159,7 @@ const statusLabel = (s: string) =>
                               : t.kind === "usage"
                                 ? "工具消费"
                                 : "余额变动"
-                          }}</span
-                          ><span class="wallet-entry-note"
+                          }}</span><span class="wallet-entry-note"
                             ><TableText
                               :text="
                                 t.note ||
@@ -1201,7 +1246,9 @@ const statusLabel = (s: string) =>
             <dd>{{ usageDetail.duration_ms }} ms</dd>
             <dt>时间</dt>
             <dd>{{ date(usageDetail.created_at) }}</dd>
-            <template v-if="usageDetail.status === 'failed'">
+            <template
+              v-if="usageDetail.error_code || usageDetail.status === 'failed'"
+            >
               <dt>错误类型</dt>
               <dd class="mono">{{ usageDetail.error_code || "—" }}</dd>
               <dt>失败原因</dt>
@@ -1212,8 +1259,49 @@ const statusLabel = (s: string) =>
                 }}
               </dd>
             </template>
+            <template v-if="usageDetail.resolved_at">
+              <dt>人工结算</dt>
+              <dd>
+                {{ date(usageDetail.resolved_at) }} ·
+                {{ usageDetail.resolution_note }}
+              </dd>
+            </template>
           </dl>
-          <button class="btn outline full" @click="usageDetail = null">
+          <form
+            v-if="
+              session.user?.role === 'admin' && usageDetail.status === 'unknown'
+            "
+            @submit.prevent="resolveUsage"
+          >
+            <label>
+              核实后的结算结果
+              <select v-model="resolutionOutcome" required>
+                <option value="" disabled>请选择</option>
+                <option value="success">确认成功并扣费</option>
+                <option value="failed">确认失败并退回预留</option>
+              </select>
+            </label>
+            <label>
+              核实依据
+              <textarea
+                v-model="resolutionNote"
+                rows="2"
+                required
+                maxlength="500"
+              />
+            </label>
+            <p v-if="resolutionError" class="alert error" role="alert">
+              {{ resolutionError }}
+            </p>
+            <button class="btn primary full" :disabled="resolving">
+              {{ resolving ? "提交中…" : "确认结算" }}
+            </button>
+          </form>
+          <button
+            class="btn outline full"
+            @click="usageDetail = null"
+            :disabled="resolving"
+          >
             关闭
           </button>
         </template>

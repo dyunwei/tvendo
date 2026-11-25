@@ -81,8 +81,11 @@ HTTP 错误保留字符串 `error`；费用相关错误增加 code、settlement�
 | 410 / RESULT_UNAVAILABLE | 调用已结算，结果未保存或已过期 |
 | 429 | 频率超限 |
 | 502 / UPSTREAM_FAILED | 只有 settlement=refunded 才表示预留已退回 |
+| 503 / UPSTREAM_OUTCOME_UNKNOWN | 上游结果待核实，维持余额预留，查询原调用记录 |
 | 503 / SETTLEMENT_UNKNOWN | 先查询记录，禁止自动重试 |
 
-调用记录状态为 running、success、failed。running 包括执行中及尚未结算；失败记录的 cost_micros 表示原预留金额，不代表仍收取该笔费用，应结合状态和账目判断。客户端超时或丢失响应时，用请求标识核对记录，不把「没有马上查到」当作可以安全重试的证明。
+调用记录状态为 running、success、failed、unknown。running 表示仍在执行或结算，unknown 表示上游结果待核实。收到成功响应但无法读取完整结果、发送后网络中断或进程中断时，余额保持预留并按预留当日计入预算。失败记录的 cost_micros 表示原预留金额，不代表仍收取该笔费用，应结合状态和账目判断。客户端超时或丢失响应时，用请求标识核对记录，不把「没有马上查到」当作可以安全重试的证明。
+
+管理员可在「用量记录 → 待核实」查询上游记录，并在调用详情中选择确认成功扣费或确认失败退款，也可用管理员会话和 CSRF 令牌调用 `POST /api/admin/runs/{id}/resolve`，请求体传 `outcome`（`success` 或 `failed`）和 `note`（核实依据，最多 500 字节）。结算会记录操作人及核实依据，同一笔只能处理一次。
 
 [Agent 接入](agent-access.md) · [文档索引](README.md)

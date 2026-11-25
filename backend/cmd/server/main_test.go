@@ -99,6 +99,10 @@ func TestIntegrationBilling(t *testing.T) {
 		if r.Header.Get("X-API-Key") != "upstream-secret" {
 			t.Error("upstream secret missing")
 		}
+		if r.URL.Path == "/unknown" {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
 		if r.URL.Path == "/fail" {
 			writeJSON(w, 500, map[string]any{"error": map[string]string{"message": "quota exceeded for upstream-secret"}})
 			return
@@ -159,7 +163,7 @@ func TestIntegrationBilling(t *testing.T) {
 	apiKey := out["key"].(string)
 	keyID := out["id"]
 	secret := "upstream-secret"
-	tool := Tool{Slug: "test", Name: "Test", Category: "Testing", BaseURL: upstream.URL, AuthHeader: "X-API-Key", Secret: &secret, Enabled: true, Endpoints: []Endpoint{{ID: "ok", Name: "OK", Path: "/ok", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}, {ID: "fail", Name: "Fail", Path: "/fail", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}}}
+	tool := Tool{Slug: "test", Name: "Test", Category: "Testing", BaseURL: upstream.URL, AuthHeader: "X-API-Key", Secret: &secret, Enabled: true, Endpoints: []Endpoint{{ID: "ok", Name: "OK", Path: "/ok", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}, {ID: "fail", Name: "Fail", Path: "/fail", Method: "POST", Price: 1000000, Parameters: json.RawMessage(`{}`)}, {ID: "unknown", Name: "Timeout", Path: "/unknown", Method: "POST", Price: 1000000}}}
 	code, out, _ = request("POST", "/api/admin/tools", tool, adminCookie, adminCSRF, "")
 	require(code, 200, out)
 	testProviderID := int64(out["id"].(float64))
@@ -406,16 +410,32 @@ func TestIntegrationBilling(t *testing.T) {
 			}
 		})
 	}
-	_, e = db.Exec(ctx, `INSERT INTO usage(user_id,tool_name,endpoint,cost,created_at) VALUES($1,'Test','/ok',100000,'2000-01-01')`, userID)
+	var interruptedID int64
+	e = db.QueryRow(ctx, `INSERT INTO usage(user_id,tool_name,endpoint,cost,created_at) VALUES($1,'Test','/ok',100000,'2000-01-01') RETURNING id`, userID).Scan(&interruptedID)
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, _ = db.Exec(ctx, `UPDATE users SET balance=balance-100000 WHERE id=$1`, userID)
+	if _, e = db.Exec(ctx, `UPDATE users SET balance=balance-100000 WHERE id=$1`, userID); e != nil {
+		t.Fatal(e)
+	}
 	a.recoverRuns(ctx)
 	a.recoverRuns(ctx)
 	u, _ = a.user(ctx, userID)
+	var interruptedStatus string
+	if e = db.QueryRow(ctx, `SELECT status FROM usage WHERE id=$1`, interruptedID).Scan(&interruptedStatus); e != nil || u.Balance != 400000 || interruptedStatus != "unknown" {
+		t.Fatalf("abandoned reservation: balance=%d state=%s error=%v", u.Balance, interruptedStatus, e)
+	}
+	path := fmt.Sprintf("/api/admin/runs/%d/resolve", interruptedID)
+	resolution := map[string]string{"outcome": "failed", "note": "Upstream confirmed that no action was performed."}
+	code, out, _ = request("POST", path, resolution, userCookie, userCSRF, "")
+	require(code, 403, out)
+	code, out, _ = request("POST", path, resolution, adminCookie, adminCSRF, "")
+	require(code, 200, out)
+	code, out, _ = request("POST", path, resolution, adminCookie, adminCSRF, "")
+	require(code, 409, out)
+	u, _ = a.user(ctx, userID)
 	if u.Balance != 500000 {
-		t.Fatal("reservation recovery not idempotent")
+		t.Fatal("manual refund did not restore the reservation exactly once")
 	}
 	t.Setenv("ADMIN_PASSWORD", "different-valid-password")
 	if e = a.bootstrap(ctx); e != nil {
@@ -610,6 +630,32 @@ func TestIntegrationBilling(t *testing.T) {
 		code, out, _ = request("POST", "/v1/run", body, nil, "", otherKey, key)
 		if code != 410 || out["id"] != id || out["settlement"] != "charged" {
 			t.Fatalf("expired replay should not start another call: %d %v", code, out)
+		}
+	})
+	t.Run("unknown upstream outcome", func(t *testing.T) {
+		const key = "test-upstream-unknown"
+		code, out, _ := request("POST", "/v1/run", runBody("unknown"), nil, "", otherKey, key)
+		if code != 503 || out["code"] != "UPSTREAM_OUTCOME_UNKNOWN" || out["settlement"] != "unknown" {
+			t.Fatalf("gateway timeout must preserve the reservation: %d %v", code, out)
+		}
+		runID := int64(out["id"].(float64))
+		code, out, _ = request("POST", "/v1/run", runBody("unknown"), nil, "", otherKey, key)
+		if code != 503 || out["id"] != float64(runID) {
+			t.Fatalf("unknown run replay mismatch: %d %v", code, out)
+		}
+		code, out, _ = request("GET", "/v1/budgets", nil, nil, "", otherKey)
+		if code != 200 || out["data"].(map[string]any)["held_micros"] != float64(1000000) {
+			t.Fatalf("unknown reservation missing from budget: %d %v", code, out)
+		}
+		path := fmt.Sprintf("/api/admin/runs/%d/resolve", runID)
+		resolution := map[string]string{"outcome": "success", "note": "Confirmed in upstream log"}
+		code, out, _ = request("POST", path, resolution, adminCookie, adminCSRF, "")
+		require(code, 200, out)
+		var balance, entries int64
+		if err := db.QueryRow(ctx, `
+			SELECT balance,(SELECT count(*) FROM transactions WHERE user_id=users.id AND kind='usage' AND note=$1)
+			FROM users WHERE email='other@test.local'`, fmt.Sprintf("调用 #%d", runID)).Scan(&balance, &entries); err != nil || balance != 0 || entries != 1 {
+			t.Fatalf("manual charge did not settle the reservation: balance=%d entries=%d error=%v", balance, entries, err)
 		}
 	})
 	t.Run("WeChat payments", func(t *testing.T) { exercisePayments(t, a, userCookie, userCSRF, userID) })

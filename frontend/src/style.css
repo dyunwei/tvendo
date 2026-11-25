@@ -2240,6 +2240,7 @@ td:last-child {
 .status.failed {
   color: #959595;
 }
+.status.unknown,
 .status.running {
   color: #999999;
 }
@@ -3864,6 +3865,7 @@ td:last-child {
 .console-shell .status.failed i {
   background: var(--status-error);
 }
+.console-shell .status.unknown i,
 .console-shell .status.running i {
   background: var(--icon-accent);
 }
@@ -4041,6 +4043,7 @@ td:last-child {
 .modal-backdrop .status.failed i {
   background: var(--status-error);
 }
+.modal-backdrop .status.unknown i,
 .modal-backdrop .status.running i {
   background: var(--icon-accent);
 }

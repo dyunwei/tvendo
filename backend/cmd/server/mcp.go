@@ -241,9 +241,13 @@ func schemaExampleValue(s map[string]any, depth int) any {
 
 // Only tool-call errors are suitable for user-facing diagnostics. Connection
 // errors may contain credential-bearing URLs and use a generic message instead.
-type mcpCallError struct{ detail string }
+type mcpCallError struct {
+	detail string
+	cause  error
+}
 
 func (e *mcpCallError) Error() string { return e.detail }
+func (e *mcpCallError) Unwrap() error { return e.cause }
 
 func (a *App) mcpCallDetail(t Tool, err error) string {
 	var call *mcpCallError
@@ -473,6 +477,11 @@ func (a *App) bulkMCP(w http.ResponseWriter, r *http.Request, u User) {
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
+
+type uncertainMCPError struct{ error }
+
+func (e *uncertainMCPError) Unwrap() error { return e.error }
+
 func (a *App) callMCP(ctx context.Context, t Tool, ep Endpoint, args map[string]any) ([]byte, error) {
 	session, err := a.connectMCP(ctx, t)
 	if err != nil {
@@ -481,7 +490,7 @@ func (a *App) callMCP(ctx context.Context, t Tool, ep Endpoint, args map[string]
 	defer session.Close()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: ep.MCPName, Arguments: args})
 	if err != nil {
-		return nil, &mcpCallError{detail: err.Error()}
+		return nil, &uncertainMCPError{&mcpCallError{detail: err.Error(), cause: err}}
 	}
 	if result.IsError {
 		parts := []string{}
@@ -494,7 +503,10 @@ func (a *App) callMCP(ctx context.Context, t Tool, ep Endpoint, args map[string]
 	}
 	data, err := json.Marshal(result)
 	if len(data) > 8<<20 {
-		return nil, errors.New("MCP result exceeds 8 MB")
+		return nil, &uncertainMCPError{errResponseTooLarge}
 	}
-	return data, err
+	if err != nil {
+		return nil, &uncertainMCPError{err}
+	}
+	return data, nil
 }
