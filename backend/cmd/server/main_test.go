@@ -95,6 +95,48 @@ func TestIntegrationBilling(t *testing.T) {
 	if e = a.bootstrap(ctx); e != nil {
 		t.Fatal(e)
 	}
+	t.Run("shared traffic limits", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		global := trafficLimit{"test:global", 3, 24 * time.Hour}
+		first := trafficLimit{"test:first", 1, 24 * time.Hour}
+		second := trafficLimit{"test:second", 2, 24 * time.Hour}
+		if !a.rateAllowed(httptest.NewRecorder(), r, first, global) {
+			t.Fatal("initial quota denied")
+		}
+		denied := httptest.NewRecorder()
+		if a.rateAllowed(denied, r, first, global) || denied.Code != 429 || denied.Header().Get("Retry-After") == "" {
+			t.Fatalf("per-user quota was not enforced: %d", denied.Code)
+		}
+		for range 2 {
+			if !a.rateAllowed(httptest.NewRecorder(), r, second, global) {
+				t.Fatal("denied request consumed the other user's shared quota")
+			}
+		}
+		if a.rateAllowed(httptest.NewRecorder(), r, trafficLimit{"test:third", 2, 24 * time.Hour}, global) {
+			t.Fatal("global limit not enforced")
+		}
+		release, ok := a.reserveConcurrency(httptest.NewRecorder(), r, "test", 1, 2, 1)
+		if !ok {
+			t.Fatal("first concurrent slot denied")
+		}
+		if _, ok := a.reserveConcurrency(httptest.NewRecorder(), r, "test", 1, 2, 1); ok {
+			t.Fatal("per-user concurrency limit not enforced")
+		}
+		releaseSecond, ok := a.reserveConcurrency(httptest.NewRecorder(), r, "test", 2, 2, 1)
+		if !ok {
+			t.Fatal("second user's slot denied")
+		}
+		defer releaseSecond()
+		if _, ok := a.reserveConcurrency(httptest.NewRecorder(), r, "test", 3, 2, 1); ok {
+			t.Fatal("global concurrency limit not enforced")
+		}
+		release()
+		releaseThird, ok := a.reserveConcurrency(httptest.NewRecorder(), r, "test", 3, 2, 1)
+		if !ok {
+			t.Fatal("released slot did not become available")
+		}
+		releaseThird()
+	})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-API-Key") != "upstream-secret" {
 			t.Error("upstream secret missing")

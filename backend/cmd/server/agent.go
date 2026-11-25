@@ -67,12 +67,31 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 		fail(w, 400, err.Error())
 		return
 	}
+	ref := r.PathValue("ref")
+	query := strings.ToLower(strings.Join(strings.Fields(r.URL.Query().Get("q")), " "))
+	if len(query) > 4096 {
+		fail(w, 400, "搜索关键词不能超过 4096 字节")
+		return
+	}
+	if !a.rateAllowed(w, r, requestLimits("search", u)...) {
+		return
+	}
+	if ref == "" && query != "" && a.search != nil {
+		release, ok := a.reserveConcurrency(w, r, "search", u.ID, 32, 4)
+		if !ok {
+			return
+		}
+		defer release()
+		if !a.rateAllowed(w, r, requestLimits("models", u)...) {
+			return
+		}
+	}
 	docs, err := a.catalogDocuments(r.Context())
 	if err != nil {
 		fail(w, 500, "无法读取工具目录")
 		return
 	}
-	if ref := r.PathValue("ref"); ref != "" {
+	if ref != "" {
 		for _, d := range docs {
 			if d.item.Ref == ref {
 				agentOK(w, d.item)
@@ -80,11 +99,6 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request, u User) {
 			}
 		}
 		fail(w, 404, "工具不存在或未启用")
-		return
-	}
-	query := strings.ToLower(strings.Join(strings.Fields(r.URL.Query().Get("q")), " "))
-	if len(query) > 4096 {
-		fail(w, 400, "搜索关键词不能超过 4096 字节")
 		return
 	}
 	items := make([]catalogItem, 0, len(docs))

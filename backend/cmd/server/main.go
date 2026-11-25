@@ -16,10 +16,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -45,6 +45,7 @@ type App struct {
 	payments          *wechatPayment
 	search            *catalogSearch
 	searchFallbackRef string
+	trustedProxies    []netip.Prefix
 }
 type User struct {
 	KeyID        int64  `json:"-"`
@@ -166,18 +167,6 @@ func (a *App) user(ctx context.Context, id int64) (User, error) {
 	u.Currency = billing.Currency
 	return u, e
 }
-func (a *App) rate(r *http.Request, prefix string, max int64) bool {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	key := "rate:" + prefix + ":" + host + ":" + strconv.FormatInt(time.Now().Unix()/60, 10)
-	n, e := a.redis.Incr(r.Context(), key).Result()
-	if e != nil {
-		return false
-	}
-	if n == 1 {
-		a.redis.Expire(r.Context(), key, 2*time.Minute)
-	}
-	return n <= max
-}
 func (a *App) session(r *http.Request) (Session, error) {
 	var s Session
 	c, e := r.Cookie("tv_session")
@@ -226,8 +215,7 @@ func (a *App) newSession(w http.ResponseWriter, r *http.Request, u User) {
 	writeJSON(w, 200, map[string]any{"user": u, "csrf": s.CSRF})
 }
 func (a *App) auth(w http.ResponseWriter, r *http.Request) {
-	if !a.rate(r, "auth", 12) {
-		fail(w, 429, "操作过于频繁，请稍后重试")
+	if !a.rateAllowed(w, r, trafficLimit{"auth:ip:" + a.clientIP(r), 12, minute}) {
 		return
 	}
 	var b struct {
@@ -714,10 +702,14 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 			return
 		}
 	}
-	if !a.rate(r, "run", 120) {
-		fail(w, 429, "调用频率超限")
+	if !a.rateAllowed(w, r, requestLimits("run", u)...) {
 		return
 	}
+	release, ok := a.reserveConcurrency(w, r, "run", u.ID, 128, 16)
+	if !ok {
+		return
+	}
+	defer release()
 	var raw []byte
 	var provider Tool
 	e := a.db.QueryRow(r.Context(), `SELECT to_jsonb(t) FROM tools t WHERE enabled=true AND (($1<>'' AND slug=$1) OR ($2::bigint>0 AND id=$2))`, b.Tool, providerID).Scan(&raw)
@@ -1106,6 +1098,10 @@ func main() {
 		log.Fatal(e)
 	}
 	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
+	a.trustedProxies, e = parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if e != nil {
+		log.Fatal(e)
+	}
 	if e = a.bootstrap(ctx); e != nil {
 		log.Fatal(e)
 	}

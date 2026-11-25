@@ -26,6 +26,7 @@ curl -fsSL https://github.com/dyunwei/tvendo/releases/latest/download/env.exampl
 | `ENCRYPTION_KEY` | `openssl rand -hex 32` 生成的 64 位十六进制字符串，后续保持稳定 |
 | `PUBLIC_URL` | 浏览器访问的完整来源，例如 `https://tools.example.com`，不带路径 |
 | `COOKIE_SECURE` | HTTPS 为 `true`，本机 HTTP 开发为 `false` |
+| `TRUSTED_PROXY_CIDRS` | 可选，逗号分隔的可信反向代理 CIDR |
 | `PORT` | 宿主机端口，默认 8080 |
 
 ```sh
@@ -41,6 +42,8 @@ PostgreSQL 与 Redis 不向宿主机暴露端口。数据分别保存在 Compose
 ## HTTPS
 
 在应用前配置 Caddy / Nginx 等反向代理，转发到应用 8080 端口。`PUBLIC_URL` 须与用户浏览器来源完全一致，并设置 `COOKIE_SECURE=true`。证书应被浏览器、npm 和 CLI 正常信任，尤其是通过 IP 地址访问的部署。外部非本机 CLI 服务地址要求 HTTPS。
+
+通过代理提供服务时，将应用实际连接到的代理地址加到 `TRUSTED_PROXY_CIDRS`，例如同一宿主机代理可配置为 `127.0.0.1/32,::1/128`。代理需覆盖或正确追加 `X-Forwarded-For`，并限制客户端直连应用端口。未配置时只使用直连来源，代理后的登录和注册会共用代理地址的限流额度。仅将确实由本部署控制的代理加入名单。
 
 ## 升级
 
