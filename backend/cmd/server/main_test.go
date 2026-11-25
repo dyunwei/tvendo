@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -803,6 +804,32 @@ func TestIntegrationBilling(t *testing.T) {
 		}
 		code, out, _ = request("GET", "/v1/balance", nil, nil, "", key)
 		require(code, 401, out)
+	})
+	t.Run("authenticated metrics", func(t *testing.T) {
+		const token = "test-metrics-token-at-least-24-characters"
+		get := func(token string) *httptest.ResponseRecorder {
+			r := httptest.NewRequest("GET", "/metrics", nil)
+			if token != "" {
+				r.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			return w
+		}
+		if w := get(""); w.Code != 404 {
+			t.Fatalf("metrics enabled by default: %d", w.Code)
+		}
+		a.monitoring.enabled = true
+		a.monitoring.tokenHash = sha256.Sum256([]byte(token))
+		if w := get("incorrect"); w.Code != 401 {
+			t.Fatalf("unauthorized metrics access: %d", w.Code)
+		}
+		w := get(token)
+		for _, expected := range []string{"tvendo_database_snapshot_up 1", "tvendo_tool_runs_total{outcome=\"success\"}", "tvendo_tool_run_duration_seconds_bucket", "tvendo_wechat_refunds_stale"} {
+			if w.Code != 200 || !strings.Contains(w.Body.String(), expected) {
+				t.Fatalf("missing metric %q: status=%d", expected, w.Code)
+			}
+		}
 	})
 	t.Run("WeChat payments", func(t *testing.T) { exercisePayments(t, a, userCookie, userCSRF, userID) })
 }

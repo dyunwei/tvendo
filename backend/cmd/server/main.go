@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 	"tvendo/internal/billing"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -48,6 +49,7 @@ type App struct {
 	trustedProxies    []netip.Prefix
 	mailer            accountMailer
 	mailSlots         chan struct{}
+	monitoring        metricsState
 }
 type User struct {
 	KeyID         int64    `json:"-"`
@@ -973,11 +975,14 @@ func (a *App) runAsUser(w http.ResponseWriter, r *http.Request, u User) {
 			encryptedResult = a.encrypt(string(result))
 		}
 	}
-	if e = a.settle(finishCtx, runID, u.ID, ep.Price, state, status, time.Since(start).Milliseconds(), failure, encryptedResult); e != nil {
+	elapsed := time.Since(start)
+	if e = a.settle(finishCtx, runID, u.ID, ep.Price, state, status, elapsed.Milliseconds(), failure, encryptedResult); e != nil {
+		a.monitoring.observeRun("settlement_error", elapsed)
 		log.Printf("settle run %d: %v", runID, e)
 		agentError(w, 503, "SETTLEMENT_UNKNOWN", "结算暂未完成，请查询调用记录，勿自动重试", "unknown", runID, requestID)
 		return
 	}
+	a.monitoring.observeRun(state, elapsed)
 	if state == "unknown" {
 		writeUnknownRun(w, runID, requestID)
 		return
@@ -1045,6 +1050,7 @@ func (a *App) recoverRuns(ctx context.Context) {
 }
 func (a *App) routes() http.Handler {
 	m := http.NewServeMux()
+	m.HandleFunc("GET /metrics", a.serveMetrics)
 	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		if a.db.Ping(r.Context()) != nil || a.redis.Ping(r.Context()).Err() != nil {
 			fail(w, 503, "依赖服务不可用")
@@ -1188,6 +1194,13 @@ func main() {
 		log.Fatal(e)
 	}
 	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
+	if token := os.Getenv("METRICS_TOKEN"); token != "" {
+		if len(token) < 24 || strings.IndexFunc(token, unicode.IsSpace) >= 0 {
+			log.Fatal("METRICS_TOKEN must be at least 24 characters without whitespace")
+		}
+		a.monitoring.tokenHash = sha256.Sum256([]byte(token))
+		a.monitoring.enabled = true
+	}
 	a.mailer, e = configuredAccountMailer(a.publicURL)
 	if e != nil {
 		log.Fatal(e)

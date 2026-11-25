@@ -563,6 +563,7 @@ func (a *App) recoverPayments(ctx context.Context) {
 			return
 		}
 		if e = a.reconcilePayment(ctx, o); e != nil {
+			a.monitoring.orderCheckError.Add(1)
 			paymentLogFailure("reconciliation_deferred", o.ID, e)
 		}
 	}

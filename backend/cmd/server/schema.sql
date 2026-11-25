@@ -63,6 +63,7 @@ ALTER TABLE usage ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS resolution_note TEXT NOT NULL DEFAULT '';
 ALTER TABLE usage ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS usage_unknown ON usage(id) WHERE status='unknown';
 CREATE INDEX IF NOT EXISTS usage_running_recovery ON usage(created_at) WHERE status='running';
 CREATE UNIQUE INDEX IF NOT EXISTS usage_user_idempotency ON usage(user_id, idempotency_key)
  WHERE idempotency_key IS NOT NULL;

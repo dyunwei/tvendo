@@ -187,6 +187,7 @@ func (a *App) recoverPaymentRefunds(ctx context.Context) {
 		return
 	}
 	if err != nil {
+		a.monitoring.refundError.Add(1)
 		paymentLogFailure("refund_claim_failed", orderID, err)
 		return
 	}
@@ -194,6 +195,7 @@ func (a *App) recoverPaymentRefunds(ctx context.Context) {
 	defer cancel()
 	order, err := scanPayment(a.db.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_orders WHERE id=$1`, orderID))
 	if err != nil {
+		a.monitoring.refundError.Add(1)
 		paymentLogFailure("refund_order_unavailable", orderID, err)
 		return
 	}
@@ -206,6 +208,7 @@ func (a *App) recoverPaymentRefunds(ctx context.Context) {
 		err = a.applyPaymentRefund(ctx, order, refund)
 	}
 	if err != nil {
+		a.monitoring.refundError.Add(1)
 		paymentLogFailure("refund_check_deferred", orderID, err)
 	}
 }

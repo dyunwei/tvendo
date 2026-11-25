@@ -1,0 +1,65 @@
+groups:
+  - name: tvendo
+    rules:
+      - alert: TvendoScrapeUnavailable
+        expr: up{job="tvendo"} == 0 or tvendo_database_snapshot_up{job="tvendo"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tvendo metrics or database snapshot unavailable"
+
+      - alert: TvendoToolFailureRate
+        expr: |
+          (
+            sum by (job) (rate(tvendo_tool_runs_total{outcome!="success"}[10m]))
+            / clamp_min(sum by (job) (rate(tvendo_tool_runs_total[10m])), 0.001)
+          ) > 0.2
+          and sum by (job) (increase(tvendo_tool_runs_total[10m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 20% of Tvendo tool calls are failing"
+
+      - alert: TvendoToolLatency
+        expr: |
+          histogram_quantile(0.95, sum by (job, le) (rate(tvendo_tool_run_duration_seconds_bucket{outcome="success"}[10m]))) > 30
+          and sum by (job) (increase(tvendo_tool_runs_total{outcome="success"}[10m])) >= 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tvendo tool p95 latency exceeds 30 seconds"
+
+      - alert: TvendoRunSettlementPending
+        expr: tvendo_tool_runs_unknown + tvendo_tool_runs_stale > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tvendo has tool reservations that need review"
+
+      - alert: TvendoWeChatRecoveryErrors
+        expr: sum by (job, operation) (increase(tvendo_wechat_background_errors_total[30m])) >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tvendo WeChat payment recovery is repeatedly failing"
+
+      - alert: TvendoWeChatSettlementPending
+        expr: tvendo_wechat_orders_stale + tvendo_wechat_refunds_stale > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tvendo has stale WeChat orders or refunds"
+
+      - alert: TvendoWeChatBillNeedsReview
+        expr: tvendo_wechat_bill_differences + tvendo_wechat_bill_missing > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tvendo WeChat reconciliation is missing or has differences"

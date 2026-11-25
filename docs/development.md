@@ -54,9 +54,11 @@ node --test scripts/release.test.mjs
 
 GitHub Actions 配置位于 `.github/workflows/ci.yml`，推送到 `main`、提交 Pull Request 或手动触发时运行：
 
-- Node.js 24 前端类型检查与生产构建。
+- Node.js 24 前端类型检查、生产构建和 Chromium 浏览器回归。
 - Go 1.26 静态分析及 race 测试；自动启动独立的 PostgreSQL 17 / Redis 7，执行单元与集成测试。
 - Docker 多阶段镜像构建验证。
+
+浏览器回归使用模拟 API，测试登录、历史记录分页筛选和受限密钥创建。本机在 `frontend` 执行 `npx playwright install chromium`、`npm run build` 和 `npm run test:e2e`。
 
 CI 使用临时测试凭据，不需要配置仓库 Secrets；数据库与 Redis 随任务结束销毁。
 

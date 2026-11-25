@@ -64,6 +64,24 @@ PostgreSQL 与 Redis 不向宿主机暴露端口。数据分别保存在 Compose
 
 修改或重置密码会注销此前所有浏览器会话。管理员可停用普通账户，此时会话失效、API Key 暂停使用。恢复账户后未过期且未撤销的密钥恢复使用。需要轮换密钥时，可在控制台撤销并新建。
 
+## 指标与告警
+
+用 `openssl rand -hex 32` 生成独立的 `METRICS_TOKEN`，重启服务后用 Prometheus 抓取 `/metrics`。保持监控网络和令牌受控，并通过 HTTPS 跨网络传输。将令牌写入监控端可读的文件，加载 [告警规则](../ops/alerts.yml)，将告警通过现有 Alertmanager 路由发送给值班人员。
+
+```yaml
+rule_files: ["/etc/prometheus/tvendo-alerts.yml"]
+scrape_configs:
+  - job_name: tvendo
+    scheme: https
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/tvendo_metrics_token
+    static_configs:
+      - targets: ["tools.example.com"]
+```
+
+调用次数与延迟分布按成功、失败、结果未知和结算错误聚合。数据库指标报告待核实调用、过期未确认的微信订单、异常或停滞的退款，以及昨日对账结果。在多实例部署中，调用计数按实例求和，数据库状态各实例读取同一份数据，应按部署去重。
+
 ## 备份与恢复
 
 将 `.env` 与数据库备份分别妥善保存。原 `ENCRYPTION_KEY` 丢失后无法解密已有上游密钥；只备份数据库不足以恢复这些凭据。

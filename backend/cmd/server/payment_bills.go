@@ -342,6 +342,7 @@ func (a *App) checkYesterdayPaymentBill(ctx context.Context) {
 		_, err = a.checkPaymentBill(ctx, yesterday)
 	}
 	if err != nil {
+		a.monitoring.billError.Add(1)
 		paymentLogFailure("bill_check_failed", yesterday.Format(time.DateOnly), err)
 	}
 }
