@@ -782,8 +782,7 @@ func TestIntegrationBilling(t *testing.T) {
 		if code != 403 || out["code"] != "KEY_TOOL_DENIED" {
 			t.Fatalf("restricted tool allowed: %d %v", code, out)
 		}
-		code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", key)
-		require(code, 200, out)
+		exerciseMCPAgent(t, h, key, toolRef(testProviderID, "ok"))
 		code, out, _ = request("POST", "/v1/run", runBody("ok"), nil, "", key)
 		if code != 403 || out["code"] != "KEY_BUDGET_EXCEEDED" {
 			t.Fatalf("key budget not enforced: %d %v", code, out)

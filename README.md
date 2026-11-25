@@ -27,7 +27,7 @@
 | --- | --- |
 | 工具目录 | 端点能力说明、参数 Schema、输入示例与价格 |
 | Agent 工具检索 | 默认关键词搜索；可选跨语言向量召回与 Rerank 重排、相关性过滤、无匹配时推荐网页搜索工具 |
-| Agent 接入 | 中文 Skill、Go CLI、REST API |
+| Agent 接入 | 中文 Skill、Go CLI、REST API、原生 MCP |
 | 上游管理 | HTTP 配置、MCP 工具同步、批量上下架与定价 |
 | 余额与预算 | 余额预留、成功结算、失败退款、单次与每日预算 |
 | 钱包与充值 | 微信 Native 扫码支付、订单状态、自动入账、充值与消费流水；保留管理员人工充值 |
@@ -78,6 +78,8 @@ docker compose -f compose.yaml -f compose.wechat.yaml up -d
 ```text
 安装 https://<你的服务地址>/SKILL.md 为用户级技能，配置并验证接入。
 ```
+
+支持远程 Streamable HTTP 的 MCP 客户端可直接连接 `https://<你的服务地址>/mcp`，使用平台 API Key 作为 Bearer 凭据。
 
 也可直接安装 CLI，在本机配置 `TVENDO_SERVER` 和 `TVENDO_API_KEY` 后使用：
 

@@ -115,9 +115,22 @@ const items = [
         <a href="/SKILL.md" target="_blank" rel="noopener" class="btn outline"
           >查看 SKILL.md <ArrowUpRight :size="15"
         /></a>
+        <h2>原生 MCP 接入</h2>
+        <p>
+          在支持 Streamable HTTP
+          的客户端添加以下服务地址，并通过客户端的密钥配置添加
+          <code>Authorization: Bearer &lt;平台 API Key&gt;</code>。
+        </p>
+        <pre>{{ base }}/mcp</pre>
+        <p>
+          连接后使用 <code>tvendo_search_tools</code> 搜索、<code
+            >tvendo_show_tool</code
+          >
+          核对价格和参数，并在授权费用范围内调用。
+        </p>
         <div class="alert">
-          支持中文 Skill、REST API、Go CLI 及上游 MCP 工具。CLI 安装入口见
-          /v1/info；Docker 镜像自带 npm 安装包与六种平台二进制，无需本机编译。
+          CLI 安装入口见 /v1/info；Docker 镜像自带 npm
+          安装包与六种平台二进制，无需本机编译。
         </div></template
       >
       <template v-else-if="tab === 'api'"

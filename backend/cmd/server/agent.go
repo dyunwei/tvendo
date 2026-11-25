@@ -199,6 +199,9 @@ func (a *App) withAPI(fn func(http.ResponseWriter, *http.Request, User)) http.Ha
 		}
 	}
 }
+func (a *App) agentBalance(w http.ResponseWriter, _ *http.Request, u User) {
+	agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": billing.Currency})
+}
 func (a *App) agentBudget(w http.ResponseWriter, r *http.Request, u User) {
 	var spent, held int64
 	err := a.db.QueryRow(r.Context(), `SELECT COALESCE(sum(cost) FILTER (WHERE status='success'),0),COALESCE(sum(cost) FILTER (WHERE status IN ('running','unknown')),0) FROM usage WHERE user_id=$1 AND created_at >= date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, u.ID).Scan(&spent, &held)
@@ -222,6 +225,7 @@ func (a *App) cliAsset(w http.ResponseWriter, r *http.Request) {
 func (a *App) cliInfo() map[string]any {
 	info := map[string]any{"brand": "T vendo", "api_version": 1, "version": buildVersion, "currency": billing.Currency, "micros_per_unit": 1000000, "cli_available": false, "skill_url": a.publicURL + "/SKILL.md"}
 	info["run_idempotency"] = true
+	info["mcp_url"] = a.publicURL + "/mcp"
 	raw, err := os.ReadFile(filepath.Join(env("CLI_DIST", "../distribution/dist"), "manifest.json"))
 	var manifest struct {
 		Version string `json:"version"`

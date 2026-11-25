@@ -5,6 +5,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://localhost:8080",
+      "/mcp": "http://localhost:8080",
       "/v1": "http://localhost:8080",
       "/cli": "http://localhost:8080",
       "/SKILL.md": "http://localhost:8080",

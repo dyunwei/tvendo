@@ -129,6 +129,8 @@ func requestLimits(kind string, u User) []trafficLimit {
 		if u.KeyID != 0 {
 			limits = append(limits, trafficLimit{key, 40, minute})
 		}
+	case "mcp":
+		limits = append(limits, trafficLimit{account, 180, minute}, trafficLimit{key, 120, minute}, trafficLimit{kind + ":all", 1200, minute})
 	case "models":
 		limits = append(limits, trafficLimit{account, 500, 24 * time.Hour}, trafficLimit{kind + ":all", 5000, 24 * time.Hour})
 	}

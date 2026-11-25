@@ -10,6 +10,34 @@
 
 Agent 会读取实际部署提供的说明，按宿主规则安装到用户级技能目录，再配置 CLI 并验证连接。安装位置和支持情况由宿主 Agent 决定。
 
+## 原生 MCP 接入
+
+支持远程 Streamable HTTP 和自定义请求头的 MCP 客户端可直接连接 `https://<服务地址>/mcp`，传入 `Authorization: Bearer <平台 API Key>`。例如，支持 `mcpServers` 配置的客户端可使用以下结构：
+
+```json
+{
+  "mcpServers": {
+    "tvendo": {
+      "type": "http",
+      "url": "https://tools.example.com/mcp",
+      "headers": { "Authorization": "Bearer <平台 API Key>" }
+    }
+  }
+}
+```
+
+按客户端支持的方式从本地环境变量或密钥管理器读取密钥。工具调用复用同一账户和 API Key 的工具权限、余额、预算及限流。
+
+| MCP 工具 | 用途 |
+| --- | --- |
+| `tvendo_search_tools` | 用需求发现目录端点，返回 `tool_ref`、售价与分页游标 |
+| `tvendo_show_tool` | 查看端点的参数 Schema、示例与当前售价 |
+| `tvendo_run_tool` | 按 Schema 填写 `parameters`，传入授权的 `max_cost_micros` 和本次调用的唯一 `idempotency_key` |
+| `tvendo_get_run` | 用 `run_id` 或 `request_id` 查询状态；使用调用编号和 `include_result=true` 恢复尚在 24 小时保留期内的结果 |
+| `tvendo_wallet_balance` | 查询账户可用余额 |
+
+调用的 `request_id` 与 `idempotency_key` 相同。丢失响应时用它查询原调用。原生 MCP 需要客户端支持 Bearer 头，当前使用无状态 JSON 响应。反向代理应保留配置在 `PUBLIC_URL` 的 Host，转发 `Authorization` 与 MCP 请求头。仅支持旧版 SSE 或只支持 OAuth 登录的客户端可改用 CLI。
+
 ## 安装 CLI
 
 需要 Node.js 18+：

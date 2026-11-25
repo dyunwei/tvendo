@@ -1051,6 +1051,7 @@ func (a *App) recoverRuns(ctx context.Context) {
 func (a *App) routes() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /metrics", a.serveMetrics)
+	m.Handle("/mcp", a.mcpAgentHandler())
 	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		if a.db.Ping(r.Context()) != nil || a.redis.Ping(r.Context()).Err() != nil {
 			fail(w, 503, "依赖服务不可用")
@@ -1123,9 +1124,7 @@ func (a *App) routes() http.Handler {
 	m.HandleFunc("GET /v1/runs/{id}", a.withAPI(a.agentRuns))
 	m.HandleFunc("GET /v1/runs/{id}/result", a.withAPI(a.getRunResult))
 	m.HandleFunc("GET /v1/budgets", a.withAPI(a.agentBudget))
-	m.HandleFunc("GET /v1/balance", a.withAPI(func(w http.ResponseWriter, r *http.Request, u User) {
-		agentOK(w, map[string]any{"balance_micros": u.Balance, "currency": billing.Currency})
-	}))
+	m.HandleFunc("GET /v1/balance", a.withAPI(a.agentBalance))
 	m.HandleFunc("GET /cli/install.sh", a.installer)
 	m.HandleFunc("GET /cli/{name}", a.cliAsset)
 	m.HandleFunc("GET /SKILL.md", a.skill)
