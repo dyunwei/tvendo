@@ -9,31 +9,29 @@ defineEmits<{ apply: [] }>();
 </script>
 
 <template>
-  <form class="history-filters" @submit.prevent="$emit('apply')">
+  <form class="console-filters" @submit.prevent="$emit('apply')">
     <label>
-      {{ label }}
-      <select v-model="filter.value">
+      <span>{{ label }}</span>
+      <select v-model="filter.value" class="console-control">
         <option value="">全部</option>
         <slot />
       </select>
     </label>
-    <label>开始日期 <input v-model="filter.from" type="date" /></label>
-    <label>结束日期 <input v-model="filter.through" type="date" /></label>
-    <button class="btn outline small" :disabled="loading">筛选</button>
-    <a class="btn outline small" :href="exportUrl" download>导出 CSV</a>
+    <label>
+      <span>开始日期</span>
+      <input v-model="filter.from" class="console-control" type="date" />
+    </label>
+    <label>
+      <span>结束日期</span>
+      <input v-model="filter.through" class="console-control" type="date" />
+    </label>
+    <div class="console-actions">
+      <button class="btn outline small console-control" :disabled="loading">
+        筛选
+      </button>
+      <a class="btn outline small console-control" :href="exportUrl" download
+        >导出 CSV</a
+      >
+    </div>
   </form>
 </template>
-
-<style scoped>
-.history-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-.history-filters label {
-  display: grid;
-  gap: 0.25rem;
-}
-</style>

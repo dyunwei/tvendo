@@ -278,9 +278,11 @@ function downloadExample() {
     <div v-if="notice" class="alert success">
       <CheckCircle2 :size="17" />{{ notice }}
     </div>
-    <div class="page-heading">
+    <div class="page-heading" :class="{ 'users-heading': section === 'users' }">
       <div>
-        <span class="eyebrow blue">ADMINISTRATION</span>
+        <span v-if="section !== 'users'" class="eyebrow blue"
+          >ADMINISTRATION</span
+        >
         <h1>
           {{
             section === "users"
@@ -314,7 +316,7 @@ function downloadExample() {
       <LoaderCircle class="spin" :size="15" />正在加载…
     </div>
     <template v-if="section === 'users'"
-      ><div class="search-box">
+      ><div class="search-box console-control admin-user-search">
         <Search :size="18" /><input
           v-model="search"
           placeholder="按邮箱或姓名查找用户"
@@ -336,7 +338,7 @@ function downloadExample() {
                 <th>角色</th>
                 <th>余额</th>
                 <th>注册时间</th>
-                <th />
+                <th class="admin-user-actions">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -358,25 +360,29 @@ function downloadExample() {
                 </td>
                 <td class="text-dark mono">{{ money(u.balance) }}</td>
                 <td>{{ date(u.created_at) }}</td>
-                <td>
-                  <button
-                    class="btn outline small"
-                    @click="
-                      topupUser = u;
-                      amount = 10;
-                      note = '';
-                    "
-                  >
-                    <Plus :size="14" />充值
-                  </button>
-                  <button
-                    v-if="u.role !== 'admin'"
-                    class="btn outline small"
-                    :disabled="busy"
-                    @click="toggleUser(u)"
-                  >
-                    {{ u.disabled ? "恢复" : "停用" }}
-                  </button>
+                <td class="admin-user-actions">
+                  <div class="console-actions">
+                    <button
+                      type="button"
+                      class="btn outline small console-control"
+                      @click="
+                        topupUser = u;
+                        amount = 10;
+                        note = '';
+                      "
+                    >
+                      <Plus :size="14" />充值
+                    </button>
+                    <button
+                      v-if="u.role !== 'admin'"
+                      type="button"
+                      class="btn outline small console-control"
+                      :disabled="busy"
+                      @click="toggleUser(u)"
+                    >
+                      {{ u.disabled ? "恢复" : "停用" }}
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr v-if="!shownUsers.length">

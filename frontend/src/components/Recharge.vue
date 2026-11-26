@@ -171,6 +171,13 @@ interface BillReport {
 }
 const bills = ref<BillReport[]>([]);
 const billDate = ref("");
+const appliedBillDate = ref("");
+const visibleBills = computed(() =>
+  appliedBillDate.value
+    ? bills.value.filter((bill) => bill.bill_date === appliedBillDate.value)
+    : bills.value,
+);
+const billsLoading = ref(false);
 const billBusy = ref(false);
 const billError = ref("");
 const billReasons: Record<string, string> = {
@@ -181,20 +188,24 @@ const billReasons: Record<string, string> = {
   missing_in_wechat: "微信账单缺少记录",
 };
 async function loadBills() {
+  billsLoading.value = true;
+  billError.value = "";
   try {
     bills.value = await api<BillReport[]>("/api/admin/payment-bills");
   } catch (e) {
     billError.value = (e as Error).message;
+  } finally {
+    billsLoading.value = false;
   }
 }
 async function checkBill() {
-  if (billBusy.value) return;
+  if (billBusy.value || !appliedBillDate.value) return;
   billBusy.value = true;
   billError.value = "";
   try {
     await api("/api/admin/payment-bills", {
       method: "POST",
-      body: JSON.stringify({ bill_date: billDate.value }),
+      body: JSON.stringify({ bill_date: appliedBillDate.value }),
     });
     await loadBills();
   } catch (e) {
@@ -346,8 +357,14 @@ onUnmounted(() => {
   <div :class="embedded ? 'wallet-records-toolbar' : 'section-heading'">
     <span v-if="embedded">最近 100 条订单 · 待支付订单可继续付款</span>
     <h3 v-else>{{ admin ? "在线充值订单" : "微信支付订单" }}</h3>
-    <button class="btn outline small" :disabled="ordersLoading" @click="load">
-      <RefreshCw :size="14" />刷新
+    <button
+      type="button"
+      class="btn outline"
+      :class="{ small: embedded, 'section-refresh': admin }"
+      :disabled="ordersLoading"
+      @click="load"
+    >
+      <RefreshCw :size="15" />刷新
     </button>
   </div>
   <div
@@ -456,67 +473,96 @@ onUnmounted(() => {
       </p>
     </div>
   </div>
-  <section v-if="admin && (enabled || bills.length)" class="panel">
+  <section v-if="admin && (enabled || bills.length || billError)">
     <div class="section-heading">
       <h3>微信账单对账</h3>
-      <button class="btn outline small" type="button" @click="loadBills">
-        刷新
+      <button
+        class="btn outline section-refresh"
+        type="button"
+        :disabled="billsLoading || billBusy"
+        @click="loadBills"
+      >
+        <RefreshCw :size="15" />刷新
       </button>
     </div>
-    <form v-if="enabled" class="section-heading" @submit.prevent="checkBill">
-      <label
-        >账单日期（北京时间） <input v-model="billDate" type="date" required
-      /></label>
-      <button class="btn outline small" :disabled="billBusy">
-        {{ billBusy ? "对账中…" : "核对账单" }}
-      </button>
+    <form class="console-filters" @submit.prevent="appliedBillDate = billDate">
+      <label>
+        <span>账单日期（北京时间）</span>
+        <input v-model="billDate" class="console-control" type="date" />
+      </label>
+      <div class="console-actions">
+        <button class="btn outline small console-control" :disabled="billBusy">
+          筛选
+        </button>
+      </div>
     </form>
     <p v-if="billError" class="alert error" role="alert">{{ billError }}</p>
-    <PaginatedTable :items="bills" label="账单报告分页" v-slot="{ rows }">
-      <table>
-        <thead>
-          <tr>
-            <th>账单日期</th>
-            <th>匹配</th>
-            <th>差异</th>
-            <th>核对时间</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="bill in rows" :key="bill.bill_date">
-            <td>{{ bill.bill_date }}</td>
-            <td>{{ bill.matched }}</td>
-            <td>
-              <details v-if="bill.difference_count">
-                <summary>{{ bill.difference_count }} 笔差异</summary>
-                <ul>
-                  <li v-for="(item, index) in bill.differences" :key="index">
-                    {{ billReasons[item.reason] || item.reason }} ·
-                    {{ item.local?.order_id || item.wechat?.order_id }}
-                    <span v-if="item.local">
-                      · 平台 {{ money(item.local.amount_cents * 10000) }} /
-                      {{ item.local.wechat_id }}</span
-                    >
-                    <span v-if="item.wechat">
-                      · 微信 {{ money(item.wechat.amount_cents * 10000) }} /
-                      {{ item.wechat.wechat_id }}</span
-                    >
-                  </li>
-                </ul>
-                <p v-if="bill.difference_count > bill.differences.length">
-                  显示前 {{ bill.differences.length }} 笔差异。
-                </p>
-              </details>
-              <span v-else>无</span>
-            </td>
-            <td>{{ date(bill.checked_at) }}</td>
-          </tr>
-          <tr v-if="!bills.length">
-            <td colspan="4" class="empty-cell">暂无对账记录</td>
-          </tr>
-        </tbody>
-      </table>
-    </PaginatedTable>
+    <div class="panel table-wrap">
+      <PaginatedTable
+        :items="visibleBills"
+        :reset-key="appliedBillDate"
+        label="账单报告分页"
+        v-slot="{ rows }"
+      >
+        <table>
+          <thead>
+            <tr>
+              <th>账单日期</th>
+              <th>匹配</th>
+              <th>差异</th>
+              <th>核对时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="bill in rows" :key="bill.bill_date">
+              <td>{{ bill.bill_date }}</td>
+              <td>{{ bill.matched }}</td>
+              <td>
+                <details v-if="bill.difference_count">
+                  <summary>{{ bill.difference_count }} 笔差异</summary>
+                  <ul>
+                    <li v-for="(item, index) in bill.differences" :key="index">
+                      {{ billReasons[item.reason] || item.reason }} ·
+                      {{ item.local?.order_id || item.wechat?.order_id }}
+                      <span v-if="item.local">
+                        · 平台 {{ money(item.local.amount_cents * 10000) }} /
+                        {{ item.local.wechat_id }}</span
+                      >
+                      <span v-if="item.wechat">
+                        · 微信 {{ money(item.wechat.amount_cents * 10000) }} /
+                        {{ item.wechat.wechat_id }}</span
+                      >
+                    </li>
+                  </ul>
+                  <p v-if="bill.difference_count > bill.differences.length">
+                    显示前 {{ bill.differences.length }} 笔差异。
+                  </p>
+                </details>
+                <span v-else>无</span>
+              </td>
+              <td>{{ date(bill.checked_at) }}</td>
+            </tr>
+            <tr v-if="!visibleBills.length">
+              <td colspan="4" class="empty-cell">
+                {{ appliedBillDate ? "该日期暂无对账记录" : "暂无对账记录" }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </PaginatedTable>
+    </div>
+    <div v-if="enabled && appliedBillDate" class="console-actions bill-actions">
+      <button
+        class="btn outline small console-control"
+        type="button"
+        :disabled="billBusy || billsLoading"
+        @click="checkBill"
+      >
+        {{
+          billBusy ? "对账中…" : visibleBills.length ? "重新对账" : "手动对账"
+        }}
+      </button>
+    </div>
   </section>
   <Teleport to="body">
     <div v-if="orderToRefund" class="modal-backdrop">
