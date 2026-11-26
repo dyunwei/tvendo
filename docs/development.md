@@ -30,14 +30,14 @@ Go 入口在 `backend/cmd/server/`，编译产物在 `backend/bin/`。从 `backe
 
 Go 默认提供 `../frontend/dist` 静态文件，可用 `FRONTEND_DIST` 覆盖。
 
-需要前端热更新时，后端继续运行，设置后端 `PUBLIC_URL=http://localhost:5173`，另一终端运行：
+在仓库根目录运行 `make dev` 可以启动后端。直接打开后端地址时会使用已构建的前端。需要前端热更新时，另一终端运行：
 
 ```sh
 cd frontend
 npm run dev
 ```
 
-访问 `http://localhost:5173`，Vite 将 API / Skill 请求转发到 `http://localhost:8080`。开发阶段 `COOKIE_SECURE=false`。
+访问 `http://localhost:5173`，Vite 将请求转发到 `http://localhost:8080`。当 `PUBLIC_URL` 使用 HTTP 且 `COOKIE_SECURE=false` 时，`make dev` 允许从本机和 `PUBLIC_URL` 中的主机访问后端端口及 Vite 默认端口 5173。通过局域网访问时，把 `PUBLIC_URL` 的主机设为浏览器实际使用的 IP 或主机名。直接运行发布二进制或使用 Compose 部署时，浏览器来源仍须与 `PUBLIC_URL` 一致。
 
 ## 常用命令
 

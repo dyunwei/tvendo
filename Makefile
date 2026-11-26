@@ -9,7 +9,7 @@ backend-build:
 test:
 	cd backend && go test -buildvcs=false ./...
 dev:
-	cd backend && go run -buildvcs=false ./cmd/server
+	cd backend && TVENDO_DEV=true go run -buildvcs=false ./cmd/server
 deps-up:
 	docker compose -p tvendo-dev -f compose.yaml -f compose.dev.yaml up -d postgres redis
 deps-down:

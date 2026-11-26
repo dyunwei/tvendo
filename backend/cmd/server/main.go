@@ -41,6 +41,7 @@ type App struct {
 	redis             *redis.Client
 	crypt             cipher.AEAD
 	publicURL         string
+	devOrigins        map[string]bool
 	secure            bool
 	client            *http.Client
 	payments          *wechatPayment
@@ -1158,7 +1159,7 @@ func (a *App) routes() http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
 			origin := r.Header.Get("Origin")
-			if origin != "" && origin != a.publicURL {
+			if !a.allowsOrigin(origin) {
 				fail(w, 403, "来源不被允许")
 				return
 			}
@@ -1192,7 +1193,11 @@ func main() {
 	if e = rc.Ping(ctx).Err(); e != nil {
 		log.Fatal(e)
 	}
-	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
+	port := env("PORT", "8080")
+	a := &App{db: db, redis: rc, crypt: crypt, publicURL: strings.TrimRight(env("PUBLIC_URL", httpOrigin("localhost", port)), "/"), secure: env("COOKIE_SECURE", "false") == "true", client: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{DialContext: safeDial, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 55 * time.Second, MaxIdleConns: 50}}}
+	if os.Getenv("TVENDO_DEV") == "true" && !a.secure {
+		a.devOrigins = developmentOrigins(a.publicURL, port)
+	}
 	if token := os.Getenv("METRICS_TOKEN"); token != "" {
 		if len(token) < 24 || strings.IndexFunc(token, unicode.IsSpace) >= 0 {
 			log.Fatal("METRICS_TOKEN must be at least 24 characters without whitespace")
@@ -1249,7 +1254,7 @@ func main() {
 			}
 		}
 	}()
-	server := &http.Server{Addr: ":" + env("PORT", "8080"), Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 80 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 16}
+	server := &http.Server{Addr: ":" + port, Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 80 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 16}
 	go func() {
 		log.Printf("T vendo listening on %s", server.Addr)
 		if e := server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
